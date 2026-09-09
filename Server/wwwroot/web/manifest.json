@@ -1,14 +1,24 @@
 {
   "name": "ICQ Messenger",
   "short_name": "ICQ",
-  "description": "Classic ICQ-style messenger",
+  "description": "Classic ICQ-style messenger with WebRTC calls and E2E encryption",
   "start_url": "/web/",
-  "scope": "/web/",
   "display": "standalone",
-  "background_color": "#0d3a7a",
+  "background_color": "#1a5fb4",
   "theme_color": "#1a5fb4",
+  "orientation": "any",
   "icons": [
-    { "src": "/web/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/web/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "/web/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/web/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }
