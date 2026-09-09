@@ -1,31 +1,48 @@
-# ICQ Messenger — Full Stack Clone
+# ICQGrok — Full ICQ Messenger Analog
 
-Собственный мессенджер в стиле классического ICQ.
+Modern recreation of classic ICQ with:
 
-| Слой | Стек |
-|------|------|
-| Server | ASP.NET Core 8, SignalR, EF Core, SQLite **или** PostgreSQL |
-| iOS / macOS | SwiftUI |
-| Android | Kotlin + Jetpack Compose + official SignalR Java client |
-| Deploy | Docker Compose (PostgreSQL + server) |
+- **Server**: ASP.NET Core 8 + SignalR + EF Core (SQLite / PostgreSQL)
+- **Web PWA**: voice/video calls (WebRTC), E2E encryption (ECDH P-256 + AES-GCM), push (VAPID), smileys (*BANG* 🤦‍♂️)
+- **SwiftUI** client (macOS / iOS)
+- **Android** Jetpack Compose skeleton
 
-## Быстрый старт
+## Quick start
 
 ```bash
-cd Server && dotnet restore && dotnet run
-# → http://localhost:5000/web/  Swagger: /swagger
+cd docker
+docker compose up -d --build
+# Server: http://localhost:5000
+# Web client: http://localhost:5000/web/
 ```
 
-Docker: `cd docker && docker compose up --build` → http://localhost:8080
+Or run server directly:
 
-## Возможности
+```bash
+cd Server
+dotnet run
+```
 
-- Auth JWT + UIN, buddy list, private/group chats, SignalR
-- Web PWA (iOS home screen + Web Push)
-- WebRTC voice/video calls
-- E2E (ECDH P-256 + AES-GCM) for 1:1 text on web
-- ICQ smileys including `*BANG*`
-- File upload, FCM push, PostgreSQL/Docker
-- SwiftUI + Android Compose clients
+## Features
 
-Подробнее: см. полный README в архиве репозитория и `docs/E2E_AND_WEBRTC.md`.
+- UIN + email registration, JWT + refresh tokens
+- Buddy list / contacts, real-time chats, typing indicators, statuses
+- File upload
+- WebRTC targeted signaling (CallOffer / Answer / ICE / Hangup / Reject)
+- End-to-end encryption for web (Web Crypto)
+- Classic ICQ smileys + *BANG*
+- PWA installable + Web Push
+
+## Structure
+
+```
+Server/           # ASP.NET Core backend + wwwroot/web PWA
+Client/ICQApp/    # SwiftUI multiplatform
+Android/          # Kotlin + Compose
+docker/           # Dockerfile + docker-compose (Postgres)
+docs/             # E2E & WebRTC notes
+```
+
+## License
+
+MIT — build something fun.
