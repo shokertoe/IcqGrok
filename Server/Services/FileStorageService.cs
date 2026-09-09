@@ -18,7 +18,10 @@ public class FileStorageService : IFileStorageService
 
     public FileStorageService(IConfiguration config, ILogger<FileStorageService> logger)
     {
-        _storagePath = config["FileStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
+        var configured = config["FileStorage:Path"] ?? Path.Combine("wwwroot", "uploads");
+        _storagePath = Path.IsPathRooted(configured)
+            ? configured
+            : Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), configured));
         _baseUrl = config["FileStorage:BaseUrl"] ?? "/uploads";
         _logger = logger;
 

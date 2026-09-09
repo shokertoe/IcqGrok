@@ -20,8 +20,6 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
     ["Jwt:RefreshTokenDays"] = builder.Configuration["Jwt:RefreshTokenDays"] ?? "30",
     ["ConnectionStrings:Default"] = builder.Configuration.GetConnectionString("Default")
         ?? "Data Source=icq.db",
-    ["FileStorage:Path"] = builder.Configuration["FileStorage:Path"]
-        ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads"),
     ["FileStorage:BaseUrl"] = builder.Configuration["FileStorage:BaseUrl"] ?? "/uploads"
 });
 
@@ -37,7 +35,6 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
         opt.UseSqlite(connStr);
 });
 
-// Program to interfaces (DIP) — swap implementations without changing controllers/hub
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddSingleton<IFileStorageService, FileStorageService>();
@@ -194,12 +191,21 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    // MVP bootstrap. Prefer EF migrations for production schema evolution.
     db.Database.EnsureCreated();
 }
 
-var uploadPath = builder.Configuration["FileStorage:Path"]
-    ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
+// PhysicalFileProvider requires an absolute path — appsettings may use relative "wwwroot/uploads"
+static string ResolveContentRoot(string? configured, string relativeDefault)
+{
+    var path = string.IsNullOrWhiteSpace(configured) ? relativeDefault : configured;
+    return Path.IsPathRooted(path)
+        ? path
+        : Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), path));
+}
+
+var uploadPath = ResolveContentRoot(
+    builder.Configuration["FileStorage:Path"],
+    Path.Combine("wwwroot", "uploads"));
 Directory.CreateDirectory(uploadPath);
 
 if (app.Environment.IsDevelopment())
@@ -210,7 +216,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-var webRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "web");
+var webRoot = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "web"));
 if (Directory.Exists(webRoot))
 {
     app.UseDefaultFiles(new DefaultFilesOptions
@@ -241,7 +247,7 @@ app.MapHub<ChatHub>("/hubs/chat");
 app.MapGet("/", () => Results.Ok(new
 {
     name = "ICQ Messenger Server",
-    version = "1.1.1",
+    version = "1.1.2",
     database = usePostgres ? "PostgreSQL" : "SQLite",
     status = "running",
     hubs = new[] { "/hubs/chat" },
