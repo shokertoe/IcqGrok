@@ -25,6 +25,9 @@ public class UsersController : ControllerBase
     private Guid UserId => _auth.GetUserIdFromPrincipal(User)
         ?? throw new UnauthorizedAccessException();
 
+    /// <summary>Поиск пользователей по никнейму или UIN.</summary>
+    /// <param name="q">Строка поиска.</param>
+    /// <param name="limit">Лимит результатов (по умолчанию 20).</param>
     [HttpGet("search")]
     [ProducesResponseType(typeof(SearchUsersResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<SearchUsersResponse>> Search(
@@ -38,6 +41,7 @@ public class UsersController : ControllerBase
         return Ok(new SearchUsersResponse(users));
     }
 
+    /// <summary>Список контактов текущего пользователя.</summary>
     [HttpGet("contacts")]
     [ProducesResponseType(typeof(List<ContactDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<ContactDto>>> GetContacts()
@@ -46,6 +50,7 @@ public class UsersController : ControllerBase
         return Ok(contacts);
     }
 
+    /// <summary>Добавить контакт по UIN.</summary>
     [HttpPost("contacts")]
     [ProducesResponseType(typeof(ContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -56,6 +61,7 @@ public class UsersController : ControllerBase
         return Ok(contact);
     }
 
+    /// <summary>Принять входящий запрос в контакты.</summary>
     [HttpPost("contacts/{contactId:guid}/accept")]
     [ProducesResponseType(typeof(ContactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -66,6 +72,7 @@ public class UsersController : ControllerBase
         return Ok(contact);
     }
 
+    /// <summary>Обновить статус и статусное сообщение (Online / Away / DND и т.д.).</summary>
     [HttpPut("status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateStatus([FromBody] UpdateStatusRequest request)

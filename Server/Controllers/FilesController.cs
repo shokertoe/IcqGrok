@@ -22,8 +22,12 @@ public class FilesController : ControllerBase
         _auth = auth;
     }
 
+    /// <summary>
+    /// Загрузить файл или картинку (до 25 МБ). Возвращает URL для SendMessageRequest.
+    /// </summary>
+    /// <param name="file">Содержимое формы (multipart/form-data).</param>
     [HttpPost("upload")]
-    [RequestSizeLimit(26_214_400)]
+    [RequestSizeLimit(26_214_400)] // 25 MB + margin
     [ProducesResponseType(typeof(UploadResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UploadResponse>> Upload(IFormFile file)
