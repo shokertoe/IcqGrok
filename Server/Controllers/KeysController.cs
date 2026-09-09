@@ -1,47 +1,41 @@
 using ICQ.Server.Data;
 using ICQ.Server.Models;
-using ICQ.Server.Services;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ICQ.Server.Controllers;
 
-/// <summary>
-/// Публичные ключи E2E (ECDH): публикация своего bundle и получение ключа собеседника.
-/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
-public class KeysController : ControllerBase
+public class KeysController : ApiControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly AuthService _auth;
 
-    public KeysController(AppDbContext db, AuthService auth)
+    public KeysController(AppDbContext db, IAuthService auth) : base(auth)
     {
         _db = db;
-        _auth = auth;
     }
 
-    /// <summary>Загрузить или обновить свой ECDH public identity key.</summary>
     [HttpPut("bundle")]
     [ProducesResponseType(typeof(KeyBundleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<KeyBundleDto>> UploadBundle([FromBody] UploadKeyBundleRequest request)
     {
-        var userId = _auth.GetUserIdFromPrincipal(User);
-        if (userId is null) return Unauthorized();
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
 
         if (string.IsNullOrWhiteSpace(request.IdentityPublicKey) || request.IdentityPublicKey.Length > 512)
             return BadRequest(new { error = "Invalid public key" });
 
-        var bundle = await _db.UserKeyBundles.FindAsync(userId.Value);
+        var bundle = await _db.UserKeyBundles.FindAsync(userId);
         if (bundle is null)
         {
             bundle = new UserKeyBundle
             {
-                UserId = userId.Value,
+                UserId = userId,
                 IdentityPublicKey = request.IdentityPublicKey.Trim(),
                 UpdatedAt = DateTime.UtcNow
             };
@@ -57,8 +51,6 @@ public class KeysController : ControllerBase
         return Ok(new KeyBundleDto(bundle.UserId, bundle.IdentityPublicKey, bundle.UpdatedAt));
     }
 
-    /// <summary>Публичный ключ другого пользователя (для установки E2E-сессии).</summary>
-    /// <param name="userId">Id пользователя.</param>
     [HttpGet("bundle/{userId:guid}")]
     [ProducesResponseType(typeof(KeyBundleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -71,14 +63,13 @@ public class KeysController : ControllerBase
         return Ok(new KeyBundleDto(bundle.UserId, bundle.IdentityPublicKey, bundle.UpdatedAt));
     }
 
-    /// <summary>Есть ли у текущего пользователя загруженный key bundle.</summary>
     [HttpGet("me")]
     public async Task<ActionResult<object>> Me()
     {
-        var userId = _auth.GetUserIdFromPrincipal(User);
-        if (userId is null) return Unauthorized();
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
 
-        var bundle = await _db.UserKeyBundles.AsNoTracking().FirstOrDefaultAsync(k => k.UserId == userId.Value);
+        var bundle = await _db.UserKeyBundles.AsNoTracking().FirstOrDefaultAsync(k => k.UserId == userId);
         return Ok(new
         {
             hasKeys = bundle is not null,
