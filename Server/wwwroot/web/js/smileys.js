@@ -1,39 +1,77 @@
-/* ICQ-style smileys */
-const SMILEYS = {
-  ':)' : '😊', ':-)' : '😊',
-  ':D' : '😃', ':-D' : '😃',
-  ':(' : '😞', ':-(' : '😞',
-  ';)' : '😉', ';-)' : '😉',
-  ':P' : '😛', ':-P' : '😛', ':p' : '😛',
-  '8)' : '😎', '8-)' : '😎',
-  ":'(" : '😢',
-  ':*' : '😘', ':-*' : '😘',
-  ':O' : '😮', ':-O' : '😮',
-  ':/' : '😕', ':-/' : '😕',
-  '<3' : '❤️',
-  '*BANG*' : '🤦‍♂️', '*bang*' : '🤦‍♂️', 'BANG' : '🤦‍♂️',
-  ':beer:' : '🍺', ':coffee:' : '☕',
-  ':thumbsup:' : '👍', ':thumbsdown:' : '👎',
-  ':fire:' : '🔥', ':100:' : '💯', ':ok:' : '👌',
-  ':wave:' : '👋', ':clap:' : '👏',
-  ':heart:' : '❤️', ':broken_heart:' : '💔',
-  ':smile:' : '😄', ':laugh:' : '😂', ':wink:' : '😉',
-  ':cool:' : '😎', ':angry:' : '😠', ':cry:' : '😢',
-  ':sad:' : '😔', ':surprised:' : '😲', ':thinking:' : '🤔',
-  ':shrug:' : '🤷', ':facepalm:' : '🤦‍♂️'
+/** Classic ICQ emoticon pack (including headbanging *BANG*) */
+window.ICQ_SMILEYS = {
+  ":)": "🙂", ":-)": "🙂",
+  ":(": "🙁", ":-(": "🙁",
+  ":D": "😀", ":-D": "😀",
+  ";)": "😉", ";-)": "😉",
+  ":P": "😛", ":-P": "😛", ":p": "😛",
+  ":*": "😘", ":-*": "😘",
+  "8)": "😎", "8-)": "😎", "B)": "😎",
+  ":O": "😮", ":-O": "😮", ":o": "😮",
+  ":|": "😐", ":-|": "😐",
+  ":$": "😳", ":-$": "😳",
+  ":@": "😠", ":-@": "😠",
+  ":'(": "😢",
+  "XD": "😆", "xD": "😆",
+  ":/": "😕", ":-/": "😕",
+  "<3": "❤️", "</3": "💔",
+  ":3": "😺",
+  "O:)": "😇", "O:-)": "😇",
+  ">:(": "😡", ">:-(": "😡",
+  ":X": "🤐", ":-X": "🤐",
+  "*JOKINGLY*": "😜",
+  "*KISSING*": "💋",
+  "*STOP*": "🛑",
+  "*THUMBS UP*": "👍",
+  "*THUMBS DOWN*": "👎",
+  "*APPLAUD*": "👏",
+  "*OK*": "👌",
+  "*HELP*": "🆘",
+  "*PARTY*": "🥳",
+  "*DRINK*": "🍺",
+  "*COFFEE*": "☕",
+  "*ROSE*": "🌹",
+  "*SUN*": "☀️",
+  "*RAIN*": "🌧️",
+  "*MUSIC*": "🎵",
+  "*DANCE*": "💃",
+  "*ANGEL*": "😇",
+  "*DEVIL*": "😈",
+  "*LOVE*": "🥰",
+  "*CRAZY*": "🤪",
+  "*SICK*": "🤒",
+  "*YAWN*": "🥱",
+  "*SLEEP*": "😴",
+  "*THINK*": "🤔",
+  "*IDEA*": "💡",
+  "*BOMB*": "💣",
+  "*FIRE*": "🔥",
+  // Legendary ICQ headbang against the wall
+  "*BANG*": "🤕🧱",
+  "*HEADBANG*": "🤕🧱",
+  ":bang:": "🤕🧱",
+  "*WALL*": "🤕🧱",
+  "*FACEPALM*": "🤦",
+  "*PANIC*": "😱",
+  "*SIGH*": "😮‍💨",
+  "*SHRUG*": "🤷"
 };
 
-function expandSmileys(text) {
-  if (!text) return text;
-  let result = text;
-  const keys = Object.keys(SMILEYS).sort((a, b) => b.length - a.length);
-  for (const k of keys) {
-    const re = new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    result = result.replace(re, SMILEYS[k]);
+window.expandSmileys = function (text) {
+  if (!text) return "";
+  let result = String(text);
+  const entries = Object.entries(window.ICQ_SMILEYS).sort((a, b) => b[0].length - a[0].length);
+  for (const [code, emoji] of entries) {
+    const re = new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    result = result.replace(re, emoji);
   }
   return result;
-}
+};
 
-function getSmileyPack() {
-  return Object.entries(SMILEYS).map(([code, emoji]) => ({ code, emoji }));
-}
+/** Picker rows for UI */
+window.SMILEY_PICKER = [
+  [":)", ";)", ":D", ":P", ":*", "8)", ":O", ":("],
+  [":'(", ":@", ":$", ":|", ":/", "<3", "O:)", ">:("],
+  ["*BANG*", "*LOVE*", "*PARTY*", "*THUMBS UP*", "*APPLAUD*", "*FIRE*", "*COFFEE*", "*MUSIC*"],
+  ["*HEADBANG*", "*SHRUG*", "*PANIC*", "*SLEEP*", "*THINK*", "*DEVIL*", "*ANGEL*", "*ROSE*"]
+];
