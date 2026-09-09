@@ -79,11 +79,12 @@ public static class SmileyPack
         ["*BOMB*"] = "💣",
         ["*FIRE*"] = "🔥",
 
-        // The legendary headbanging-against-the-wall smiley
-        ["*BANG*"] = "🤦‍♂️",
-        ["*HEADBANG*"] = "🤦‍♂️",
-        [":bang:"] = "🤦‍♂️",
-        ["*WALL*"] = "🤦‍♂️",
+        // Legendary ICQ: smiley banging head against the wall
+        // (Unicode approx. — classic was an animated .gif in old ICQ)
+        ["*BANG*"] = "🤕🧱",
+        ["*HEADBANG*"] = "🤕🧱",
+        [":bang:"] = "🤕🧱",
+        ["*WALL*"] = "🤕🧱",
         ["*FACEPALM*"] = "🤦",
         ["*PANIC*"] = "😱",
         ["*SIGH*"] = "😮‍💨",
@@ -101,8 +102,37 @@ public static class SmileyPack
         return result;
     }
 
-    public static IReadOnlyList<SmileyDto> List() =>
-        Map.Select(kv => new SmileyDto(kv.Key, kv.Value)).DistinctBy(s => s.Emoji).ToList();
+    /// <summary>
+    /// Codes for the picker. Prefer canonical ICQ codes; keep *BANG*/*HEADBANG* visible.
+    /// </summary>
+    public static IReadOnlyList<SmileyDto> List()
+    {
+        // Prefer longer / canonical codes when several map to the same glyph
+        var preferred = new[]
+        {
+            "*HEADBANG*", "*BANG*", "*WALL*", ":bang:",
+            "*FACEPALM*", "*JOKINGLY*", "*KISSING*", "*THUMBS UP*", "*THUMBS DOWN*",
+            "*APPLAUD*", "*PARTY*", "*ROSE*", "*ANGEL*", "*DEVIL*", "*SHRUG*", "*PANIC*"
+        };
+
+        var byEmoji = new Dictionary<string, SmileyDto>(StringComparer.Ordinal);
+        foreach (var code in preferred)
+        {
+            if (Map.TryGetValue(code, out var emoji) && !byEmoji.ContainsKey(emoji))
+                byEmoji[emoji] = new SmileyDto(code, emoji);
+        }
+
+        foreach (var kv in Map.OrderByDescending(k => k.Key.Length))
+        {
+            if (!byEmoji.ContainsKey(kv.Value))
+                byEmoji[kv.Value] = new SmileyDto(kv.Key, kv.Value);
+        }
+
+        return byEmoji.Values
+            .OrderBy(s => s.Code.StartsWith('*') ? 1 : 0)
+            .ThenBy(s => s.Code, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }
 
 public record SmileyDto(string Code, string Emoji);
