@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+*.user
+*.db
+*.db-shm
+*.db-wal
+Server/wwwroot/uploads/*
+!Server/wwwroot/uploads/.gitkeep
+**/node_modules/
+.DS_Store
+local.properties
+*.apk
+*.aab
