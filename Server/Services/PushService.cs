@@ -105,7 +105,6 @@ public class PushService
 
     private async Task SendFcmAsync(string token, string title, string body, Dictionary<string, string> data)
     {
-        // Legacy FCM HTTP API (simple Server Key). For production prefer FCM HTTP v1 with service account.
         var serverKey = _config["Firebase:ServerKey"];
         if (string.IsNullOrEmpty(serverKey))
         {
@@ -123,7 +122,8 @@ public class PushService
 
         var client = _httpClientFactory.CreateClient();
         var request = new HttpRequestMessage(HttpMethod.Post, "https://fcm.googleapis.com/fcm/send");
-        request.Headers.Authorization = new AuthenticationHeaderValue("key", "=" + serverKey);
+        // FCM legacy API expects exactly: Authorization: key=<ServerKey>
+        request.Headers.TryAddWithoutValidation("Authorization", "key=" + serverKey);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
         try
