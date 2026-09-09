@@ -4,12 +4,14 @@ const API = {
   token: localStorage.getItem('icq_token') || null,
   refresh: localStorage.getItem('icq_refresh') || null,
 
-  setTokens(access, refresh) {
-    this.token = access;
-    this.refresh = refresh;
-    if (access) localStorage.setItem('icq_token', access);
+  setTokens(res) {
+    let accessToken = res.AccessToken;
+    let refreshToken = res.RefreshToken;
+    this.token = accessToken;
+    this.refresh = refreshToken;
+    if (accessToken) localStorage.setItem('icq_token', refreshToken);
     else localStorage.removeItem('icq_token');
-    if (refresh) localStorage.setItem('icq_refresh', refresh);
+    if (refreshToken) localStorage.setItem('icq_refresh', refreshToken);
     else localStorage.removeItem('icq_refresh');
   },
 
@@ -64,7 +66,7 @@ const API = {
     return this.request('POST', '/api/auth/register', { email, password, nickname });
   },
   login(emailOrUin, password) {
-    return this.request('POST', '/api/auth/login', { emailOrUin, password });
+    return this.request('POST', '/api/auth/login', { "NicknameOrEmail": emailOrUin, password });
   },
   me() { return this.request('GET', '/api/users/me'); },
   searchUsers(q) { return this.request('GET', '/api/users/search?q=' + encodeURIComponent(q)); },

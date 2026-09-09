@@ -99,9 +99,9 @@ function bindLogin() {
     $("#login-btn").disabled = true;
     try {
       const res = isReg
-        ? await API.register({ nickname: nick, password: pass, email })
-        : await API.login({ nicknameOrEmail: nick, password: pass });
-      API.setAuth(res);
+        ? await API.register(email,pass, nick)
+        : await API.login(nick, pass);
+      API.setTokens(res);
       state.user = res.user;
       await bootSession();
       render();
@@ -299,7 +299,7 @@ function renderMsg(m) {
 
 async function decryptMessagesForChat(chatId) {
   const chat = state.chats.find((c) => c.id === chatId);
-  const peerId = ICQE2E.peerIdFromChat(chat, state.user.id);
+  const peerId = E2E.peerIdFromChat(chat, state.user.id);
   const list = state.messages[chatId];
   if (!list || !peerId) return;
   let changed = false;
@@ -307,7 +307,7 @@ async function decryptMessagesForChat(chatId) {
     if (m.isEncrypted && !m._decrypted && m.text) {
       try {
         const keyPeer = m.senderId === state.user.id ? peerId : m.senderId;
-        m.text = await ICQE2E.decryptText(m.text, keyPeer, API);
+        m.text = await E2E.decryptText(m.text, keyPeer, API);
         m._decrypted = true;
         changed = true;
       } catch (e) {
