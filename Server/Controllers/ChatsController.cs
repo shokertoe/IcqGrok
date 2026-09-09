@@ -22,75 +22,69 @@ public class ChatsController : ControllerBase
         _auth = auth;
     }
 
-    private Guid UserId => _auth.GetUserIdFromPrincipal(User)
-        ?? throw new UnauthorizedAccessException();
+    private Guid? CurrentUserId => _auth.GetUserIdFromPrincipal(User);
 
-    /// <summary>
-    /// Список чатов текущего пользователя.
-    /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(List<ChatDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<List<ChatDto>>> GetMyChats()
     {
-        var list = await _chats.GetUserChatsAsync(UserId);
+        var userId = CurrentUserId;
+        if (userId is null) return Unauthorized();
+        var list = await _chats.GetUserChatsAsync(userId.Value);
         return Ok(list);
     }
 
-    /// <summary>
-    /// Создать или получить существующий личный чат с пользователем.
-    /// </summary>
-    /// <param name="request">Id собеседника.</param>
     [HttpPost("private")]
     [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ChatDto>> CreatePrivate([FromBody] CreatePrivateChatRequest request)
     {
-        var (chat, error) = await _chats.GetOrCreatePrivateChatAsync(UserId, request.TargetUserId);
+        var userId = CurrentUserId;
+        if (userId is null) return Unauthorized();
+        var (chat, error) = await _chats.GetOrCreatePrivateChatAsync(userId.Value, request.TargetUserId);
         if (error is not null) return BadRequest(new { error });
         return Ok(chat);
     }
 
-    /// <summary>
-    /// Создать групповой чат.
-    /// </summary>
-    /// <param name="request">Название и участники.</param>
     [HttpPost("group")]
     [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ChatDto>> CreateGroup([FromBody] CreateGroupChatRequest request)
     {
-        var (chat, error) = await _chats.CreateGroupChatAsync(UserId, request.Title, request.ParticipantIds);
+        var userId = CurrentUserId;
+        if (userId is null) return Unauthorized();
+        var (chat, error) = await _chats.CreateGroupChatAsync(userId.Value, request.Title, request.ParticipantIds);
         if (error is not null) return BadRequest(new { error });
         return Ok(chat);
     }
 
-    /// <summary>
-    /// История сообщений чата (пагинация по <paramref name="before"/>).
-    /// </summary>
-    /// <param name="chatId">Id чата.</param>
-    /// <param name="limit">Максимум сообщений (по умолчанию 50).</param>
-    /// <param name="before">Вернуть сообщения старше этой даты (UTC).</param>
     [HttpGet("{chatId:guid}/messages")]
     [ProducesResponseType(typeof(List<MessageDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<List<MessageDto>>> GetMessages(
         Guid chatId,
         [FromQuery] int limit = 50,
         [FromQuery] DateTime? before = null)
     {
-        var messages = await _chats.GetMessagesAsync(UserId, chatId, limit, before);
+        var userId = CurrentUserId;
+        if (userId is null) return Unauthorized();
+        limit = Math.Clamp(limit, 1, 200);
+        var messages = await _chats.GetMessagesAsync(userId.Value, chatId, limit, before);
         return Ok(messages);
     }
 
-    /// <summary>
-    /// Отправить сообщение (текст, файл, E2E-ciphertext).
-    /// </summary>
-    /// <param name="request">Содержимое сообщения и id чата.</param>
     [HttpPost("messages")]
     [ProducesResponseType(typeof(MessageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<MessageDto>> SendMessage([FromBody] SendMessageRequest request)
     {
-        var (message, error) = await _chats.SendMessageAsync(UserId, request);
+        var userId = CurrentUserId;
+        if (userId is null) return Unauthorized();
+        var (message, error) = await _chats.SendMessageAsync(userId.Value, request);
         if (error is not null) return BadRequest(new { error });
         return Ok(message);
     }

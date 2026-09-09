@@ -10,10 +10,9 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ─── Configuration defaults (overridden by env / appsettings / docker) ──
+// ─── Configuration defaults (dev-friendly; production must set Jwt:Key) ──
 builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 {
-    ["Jwt:Key"] = builder.Configuration["Jwt:Key"] ?? "ICQ_Super_Secret_Key_At_Least_32_Chars_Long_2024!",
     ["Jwt:Issuer"] = builder.Configuration["Jwt:Issuer"] ?? "ICQ.Server",
     ["Jwt:Audience"] = builder.Configuration["Jwt:Audience"] ?? "ICQ.Client",
     ["Jwt:AccessTokenMinutes"] = builder.Configuration["Jwt:AccessTokenMinutes"] ?? "120",
@@ -25,7 +24,6 @@ builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
     ["FileStorage:BaseUrl"] = builder.Configuration["FileStorage:BaseUrl"] ?? "/uploads"
 });
 
-// ─── Database: PostgreSQL if connection string looks like it, else SQLite ──
 var connStr = builder.Configuration.GetConnectionString("Default")!;
 var usePostgres = connStr.Contains("Host=", StringComparison.OrdinalIgnoreCase)
                   || connStr.Contains("Server=", StringComparison.OrdinalIgnoreCase);
@@ -38,7 +36,6 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
         opt.UseSqlite(connStr);
 });
 
-// ─── Services ───────────────────────────────────────────────────
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ChatService>();
 builder.Services.AddSingleton<FileStorageService>();
@@ -46,8 +43,21 @@ builder.Services.AddScoped<PushService>();
 builder.Services.AddScoped<WebPushService>();
 builder.Services.AddHttpClient();
 
-// ─── Auth ───────────────────────────────────────────────────────
-var jwtKey = builder.Configuration["Jwt:Key"]!;
+var jwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
+{
+    if (builder.Environment.IsDevelopment())
+    {
+        jwtKey = "DEV_ONLY_ICQ_JWT_Key_Min_32_chars!!";
+        Console.WriteLine("WARN: Using development JWT key. Set Jwt:Key for real deployments.");
+    }
+    else
+    {
+        throw new InvalidOperationException(
+            "Jwt:Key must be configured with at least 32 characters in non-Development environments.");
+    }
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -60,7 +70,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ClockSkew = TimeSpan.FromMinutes(1)
+            ClockSkew = TimeSpan.FromMinutes(1),
+            NameClaimType = System.Security.Claims.ClaimTypes.Name,
+            RoleClaimType = System.Security.Claims.ClaimTypes.Role
         };
 
         options.Events = new JwtBearerEvents
@@ -81,7 +93,6 @@ builder.Services.AddAuthorization();
 builder.Services.AddControllers()
     .ConfigureApiBehaviorOptions(options =>
     {
-        // Единый JSON при ошибках валидации моделей ([Required], [MaxLength], …)
         options.InvalidModelStateResponseFactory = context =>
         {
             var errors = context.ModelState
@@ -110,17 +121,33 @@ builder.Services.AddControllers()
         };
     });
 
-// DataAnnotations: неявная валидация через [ApiController] + ModelState
 builder.Services.AddSignalR();
 
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials()
-              .SetIsOriginAllowed(_ => true);
+        var origins = builder.Configuration["Cors:Origins"];
+        if (!string.IsNullOrWhiteSpace(origins))
+        {
+            policy.WithOrigins(origins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else if (builder.Environment.IsDevelopment())
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else
+        {
+            policy.AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .SetIsOriginAllowed(_ => false);
+        }
     });
 });
 
@@ -153,7 +180,6 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 
-    // XML-комментарии из сборки (GenerateDocumentationFile в csproj)
     var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     if (File.Exists(xmlPath))
@@ -165,6 +191,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // MVP bootstrap. Prefer EF migrations for production schema evolution.
     db.Database.EnsureCreated();
 }
 
@@ -180,7 +207,6 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-// Default files + static for PWA web client
 var webRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "web");
 if (Directory.Exists(webRoot))
 {
@@ -197,7 +223,6 @@ if (Directory.Exists(webRoot))
     });
 }
 
-
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadPath),
@@ -213,12 +238,12 @@ app.MapHub<ChatHub>("/hubs/chat");
 app.MapGet("/", () => Results.Ok(new
 {
     name = "ICQ Messenger Server",
-    version = "1.1.0",
+    version = "1.1.1",
     database = usePostgres ? "PostgreSQL" : "SQLite",
     status = "running",
     hubs = new[] { "/hubs/chat" },
     api = "/swagger",
-    features = new[] { "auth", "chats", "contacts", "signalr", "file-upload", "push" }
+    features = new[] { "auth", "chats", "contacts", "signalr", "file-upload", "push", "webrtc-signaling", "e2e-keys" }
 }));
 
 app.Run();

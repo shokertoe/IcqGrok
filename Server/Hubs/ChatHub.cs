@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ICQ.Server.Data;
 using ICQ.Server.Models;
 using ICQ.Server.Services;
@@ -17,8 +18,8 @@ public class ChatHub : Hub
     private readonly AppDbContext _db;
     private readonly ILogger<ChatHub> _logger;
 
-    private static readonly Dictionary<Guid, HashSet<string>> OnlineUsers = new();
-    private static readonly object Lock = new();
+    // In-memory presence (single process). For multi-instance deploy, use Redis backplane + shared store.
+    private static readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> OnlineUsers = new();
 
     public ChatHub(
         ChatService chatService,
@@ -41,12 +42,9 @@ public class ChatHub : Hub
 
     private static IReadOnlyList<string> ConnectionsOf(Guid userId)
     {
-        lock (Lock)
-        {
-            return OnlineUsers.TryGetValue(userId, out var set)
-                ? set.ToList()
-                : Array.Empty<string>();
-        }
+        return OnlineUsers.TryGetValue(userId, out var set)
+            ? set.Keys.ToList()
+            : Array.Empty<string>();
     }
 
     private async Task SendToUserAsync(Guid userId, string method, params object?[] args)
@@ -60,12 +58,8 @@ public class ChatHub : Hub
         var userId = CurrentUserId;
         if (userId is null) { Context.Abort(); return; }
 
-        lock (Lock)
-        {
-            if (!OnlineUsers.ContainsKey(userId.Value))
-                OnlineUsers[userId.Value] = new HashSet<string>();
-            OnlineUsers[userId.Value].Add(Context.ConnectionId);
-        }
+        var connections = OnlineUsers.GetOrAdd(userId.Value, _ => new ConcurrentDictionary<string, byte>());
+        connections[Context.ConnectionId] = 0;
 
         await _chatService.UpdateUserStatusAsync(userId.Value, UserStatus.Online);
         await Clients.Others.SendAsync("UserStatusChanged", userId.Value, (int)UserStatus.Online);
@@ -77,19 +71,17 @@ public class ChatHub : Hub
         var userId = CurrentUserId;
         if (userId is not null)
         {
-            bool wentOffline = false;
-            lock (Lock)
+            var wentOffline = false;
+            if (OnlineUsers.TryGetValue(userId.Value, out var connections))
             {
-                if (OnlineUsers.TryGetValue(userId.Value, out var connections))
+                connections.TryRemove(Context.ConnectionId, out _);
+                if (connections.IsEmpty)
                 {
-                    connections.Remove(Context.ConnectionId);
-                    if (connections.Count == 0)
-                    {
-                        OnlineUsers.Remove(userId.Value);
-                        wentOffline = true;
-                    }
+                    OnlineUsers.TryRemove(userId.Value, out _);
+                    wentOffline = true;
                 }
             }
+
             if (wentOffline)
             {
                 await _chatService.UpdateUserStatusAsync(userId.Value, UserStatus.Offline);
@@ -99,8 +91,24 @@ public class ChatHub : Hub
         await base.OnDisconnectedAsync(exception);
     }
 
-    public async Task JoinChat(Guid chatId) =>
+    /// <summary>Join SignalR group only if the user is a chat participant.</summary>
+    public async Task JoinChat(Guid chatId)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return;
+
+        var isMember = await _db.ChatParticipants
+            .AsNoTracking()
+            .AnyAsync(p => p.ChatId == chatId && p.UserId == userId.Value);
+
+        if (!isMember)
+        {
+            await Clients.Caller.SendAsync("Error", "Not a participant of this chat");
+            return;
+        }
+
         await Groups.AddToGroupAsync(Context.ConnectionId, chatId.ToString());
+    }
 
     public async Task LeaveChat(Guid chatId) =>
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, chatId.ToString());
@@ -120,22 +128,26 @@ public class ChatHub : Hub
         var display = message.IsEncrypted
             ? message
             : message with { Text = SmileyPack.Expand(message.Text) };
-        await Clients.Group(request.ChatId.ToString()).SendAsync("ReceiveMessage", display);
+
+        // Others in group + caller (so sender always gets ack even if not JoinChat'd)
+        await Clients.OthersInGroup(request.ChatId.ToString()).SendAsync("ReceiveMessage", display);
+        await Clients.Caller.SendAsync("ReceiveMessage", display);
 
         var participantIds = await _db.ChatParticipants
+            .AsNoTracking()
             .Where(p => p.ChatId == request.ChatId && p.UserId != userId.Value)
             .Select(p => p.UserId)
             .ToListAsync();
 
-        List<Guid> online;
-        lock (Lock) { online = OnlineUsers.Keys.ToList(); }
-
+        var online = OnlineUsers.Keys.ToHashSet();
         var preview = message.IsEncrypted ? "🔒 Encrypted message" : SmileyPack.Expand(message.Text);
         if (preview?.Length > 80) preview = preview[..80] + "…";
 
         foreach (var pid in participantIds)
         {
-            if (!online.Contains(pid))
+            if (online.Contains(pid)) continue;
+
+            try
             {
                 await _pushService.NotifyNewMessageAsync(pid, message, message.SenderNickname);
                 await _webPush.NotifyAsync(pid, message.SenderNickname, preview ?? "New message",
@@ -145,6 +157,10 @@ public class ChatHub : Hub
                         ["messageId"] = message.Id.ToString()
                     });
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push notify failed for {UserId}", pid);
+            }
         }
     }
 
@@ -152,6 +168,12 @@ public class ChatHub : Hub
     {
         var userId = CurrentUserId;
         if (userId is null) return;
+
+        var isMember = await _db.ChatParticipants
+            .AsNoTracking()
+            .AnyAsync(p => p.ChatId == chatId && p.UserId == userId.Value);
+        if (!isMember) return;
+
         await Clients.OthersInGroup(chatId.ToString())
             .SendAsync("UserTyping", chatId, userId.Value, isTyping);
     }
@@ -160,22 +182,24 @@ public class ChatHub : Hub
     {
         var userId = CurrentUserId;
         if (userId is null) return;
+        if (!Enum.IsDefined(typeof(UserStatus), status))
+        {
+            await Clients.Caller.SendAsync("Error", "Invalid status value");
+            return;
+        }
+
         await _chatService.UpdateUserStatusAsync(userId.Value, (UserStatus)status, statusMessage);
         await Clients.Others.SendAsync("UserStatusChanged", userId.Value, status, statusMessage);
     }
 
-    public Task<List<Guid>> GetOnlineUsers()
-    {
-        lock (Lock) return Task.FromResult(OnlineUsers.Keys.ToList());
-    }
+    public Task<List<Guid>> GetOnlineUsers() =>
+        Task.FromResult(OnlineUsers.Keys.ToList());
 
-    // ─── WebRTC signaling (targeted to peer connections) ────────
-
-    /// <summary>Start call: audioOnly true = voice, false = video</summary>
     public async Task CallOffer(Guid targetUserId, string sdp, bool audioOnly, string? callerName)
     {
         var userId = CurrentUserId;
         if (userId is null) return;
+        if (string.IsNullOrWhiteSpace(sdp) || sdp.Length > 256_000) return;
         await SendToUserAsync(targetUserId, "CallOffer", userId.Value, sdp, audioOnly, callerName ?? "Caller");
     }
 
@@ -183,6 +207,7 @@ public class ChatHub : Hub
     {
         var userId = CurrentUserId;
         if (userId is null) return;
+        if (string.IsNullOrWhiteSpace(sdp) || sdp.Length > 256_000) return;
         await SendToUserAsync(callerId, "CallAnswer", userId.Value, sdp);
     }
 
@@ -190,6 +215,7 @@ public class ChatHub : Hub
     {
         var userId = CurrentUserId;
         if (userId is null) return;
+        if (string.IsNullOrWhiteSpace(candidate) || candidate.Length > 16_384) return;
         await SendToUserAsync(peerId, "IceCandidate", userId.Value, candidate);
     }
 
