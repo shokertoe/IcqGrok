@@ -1,6 +1,8 @@
+using ICQ.Server.Services.Abstractions;
+
 namespace ICQ.Server.Services;
 
-public class FileStorageService
+public class FileStorageService : IFileStorageService
 {
     private readonly string _storagePath;
     private readonly string _baseUrl;
@@ -12,7 +14,7 @@ public class FileStorageService
         ".doc", ".docx", ".xls", ".xlsx",
         ".mp3", ".ogg", ".wav", ".mp4", ".webm"
     };
-    private const long MaxFileSizeBytes = 25 * 1024 * 1024; // 25 MB
+    private const long MaxFileSizeBytes = 25 * 1024 * 1024;
 
     public FileStorageService(IConfiguration config, ILogger<FileStorageService> logger)
     {

@@ -5,12 +5,13 @@ using System.Security.Cryptography;
 using System.Text;
 using ICQ.Server.Data;
 using ICQ.Server.Models;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace ICQ.Server.Services;
 
-public class AuthService
+public class AuthService : IAuthService
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;

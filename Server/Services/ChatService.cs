@@ -1,10 +1,11 @@
 using ICQ.Server.Data;
 using ICQ.Server.Models;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
 namespace ICQ.Server.Services;
 
-public class ChatService
+public class ChatService : IChatService
 {
     private readonly AppDbContext _db;
     private readonly ILogger<ChatService> _logger;

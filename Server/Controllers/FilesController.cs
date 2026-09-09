@@ -1,44 +1,35 @@
 using ICQ.Server.Models;
-using ICQ.Server.Services;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ICQ.Server.Controllers;
 
-/// <summary>
-/// Загрузка файлов и изображений (multipart). URL можно передать в SendMessage.
-/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
-public class FilesController : ControllerBase
+public class FilesController : ApiControllerBase
 {
-    private readonly FileStorageService _storage;
-    private readonly AuthService _auth;
+    private readonly IFileStorageService _storage;
 
-    public FilesController(FileStorageService storage, AuthService auth)
+    public FilesController(IFileStorageService storage, IAuthService auth) : base(auth)
     {
         _storage = storage;
-        _auth = auth;
     }
 
-    /// <summary>
-    /// Загрузить файл или картинку (до 25 МБ). Возвращает URL для SendMessageRequest.
-    /// </summary>
-    /// <param name="file">Содержимое формы (multipart/form-data).</param>
     [HttpPost("upload")]
-    [RequestSizeLimit(26_214_400)] // 25 MB + margin
+    [RequestSizeLimit(26_214_400)]
     [ProducesResponseType(typeof(UploadResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UploadResponse>> Upload(IFormFile file)
     {
-        var userId = _auth.GetUserIdFromPrincipal(User);
-        if (userId is null) return Unauthorized();
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
 
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file provided" });
 
-        var result = await _storage.SaveAsync(file, userId.Value);
+        var result = await _storage.SaveAsync(file, userId);
         if (result is null)
             return BadRequest(new { error = "Invalid file type or size (max 25 MB)" });
 

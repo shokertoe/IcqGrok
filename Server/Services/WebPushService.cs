@@ -1,12 +1,13 @@
 using System.Text.Json;
 using ICQ.Server.Data;
 using ICQ.Server.Models;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using WebPush;
 
 namespace ICQ.Server.Services;
 
-public class WebPushService
+public class WebPushService : IWebPushService
 {
     private readonly AppDbContext _db;
     private readonly ILogger<WebPushService> _logger;

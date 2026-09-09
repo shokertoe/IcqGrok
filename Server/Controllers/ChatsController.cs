@@ -1,49 +1,39 @@
 using ICQ.Server.Models;
-using ICQ.Server.Services;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ICQ.Server.Controllers;
 
-/// <summary>
-/// Чаты и сообщения: список диалогов, личные/групповые чаты, история и отправка.
-/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
-public class ChatsController : ControllerBase
+public class ChatsController : ApiControllerBase
 {
-    private readonly ChatService _chats;
-    private readonly AuthService _auth;
+    private readonly IChatService _chats;
 
-    public ChatsController(ChatService chats, AuthService auth)
+    public ChatsController(IChatService chats, IAuthService auth) : base(auth)
     {
         _chats = chats;
-        _auth = auth;
     }
-
-    private Guid? CurrentUserId => _auth.GetUserIdFromPrincipal(User);
 
     [HttpGet]
     [ProducesResponseType(typeof(List<ChatDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<List<ChatDto>>> GetMyChats()
     {
-        var userId = CurrentUserId;
-        if (userId is null) return Unauthorized();
-        var list = await _chats.GetUserChatsAsync(userId.Value);
-        return Ok(list);
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
+        return Ok(await _chats.GetUserChatsAsync(userId));
     }
 
     [HttpPost("private")]
     [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ChatDto>> CreatePrivate([FromBody] CreatePrivateChatRequest request)
     {
-        var userId = CurrentUserId;
-        if (userId is null) return Unauthorized();
-        var (chat, error) = await _chats.GetOrCreatePrivateChatAsync(userId.Value, request.TargetUserId);
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
+        var (chat, error) = await _chats.GetOrCreatePrivateChatAsync(userId, request.TargetUserId);
         if (error is not null) return BadRequest(new { error });
         return Ok(chat);
     }
@@ -51,40 +41,36 @@ public class ChatsController : ControllerBase
     [HttpPost("group")]
     [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ChatDto>> CreateGroup([FromBody] CreateGroupChatRequest request)
     {
-        var userId = CurrentUserId;
-        if (userId is null) return Unauthorized();
-        var (chat, error) = await _chats.CreateGroupChatAsync(userId.Value, request.Title, request.ParticipantIds);
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
+        var (chat, error) = await _chats.CreateGroupChatAsync(userId, request.Title, request.ParticipantIds);
         if (error is not null) return BadRequest(new { error });
         return Ok(chat);
     }
 
     [HttpGet("{chatId:guid}/messages")]
     [ProducesResponseType(typeof(List<MessageDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<List<MessageDto>>> GetMessages(
         Guid chatId,
         [FromQuery] int limit = 50,
         [FromQuery] DateTime? before = null)
     {
-        var userId = CurrentUserId;
-        if (userId is null) return Unauthorized();
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
         limit = Math.Clamp(limit, 1, 200);
-        var messages = await _chats.GetMessagesAsync(userId.Value, chatId, limit, before);
-        return Ok(messages);
+        return Ok(await _chats.GetMessagesAsync(userId, chatId, limit, before));
     }
 
     [HttpPost("messages")]
     [ProducesResponseType(typeof(MessageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<MessageDto>> SendMessage([FromBody] SendMessageRequest request)
     {
-        var userId = CurrentUserId;
-        if (userId is null) return Unauthorized();
-        var (message, error) = await _chats.SendMessageAsync(userId.Value, request);
+        if (!TryGetUserId(out var userId, out var unauthorized))
+            return unauthorized!;
+        var (message, error) = await _chats.SendMessageAsync(userId, request);
         if (error is not null) return BadRequest(new { error });
         return Ok(message);
     }
