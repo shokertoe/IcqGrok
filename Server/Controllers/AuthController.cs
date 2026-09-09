@@ -50,10 +50,15 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpGet("me")]
-    public async Task<ActionResult<UserDto>> Me()
+    public ActionResult<object> Me()
     {
         var userId = _auth.GetUserIdFromPrincipal(User);
         if (userId is null) return Unauthorized();
-        return Ok(new { id = userId, nickname = User.Identity?.Name });
+
+        return Ok(new
+        {
+            id = userId,
+            nickname = User.Identity?.Name
+        });
     }
 }
