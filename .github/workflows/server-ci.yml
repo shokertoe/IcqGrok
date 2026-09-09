@@ -1,0 +1,40 @@
+name: Server CI
+
+on:
+  pull_request:
+    paths:
+      - "Server/**"
+      - "ICQMessenger.sln"
+      - ".github/workflows/server-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Server/**"
+      - "ICQMessenger.sln"
+      - ".github/workflows/server-ci.yml"
+
+jobs:
+  build:
+    name: Build ICQ.Server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore ICQMessenger.sln
+
+      - name: Build
+        run: dotnet build ICQMessenger.sln --no-restore -c Release -warnaserror
+
+      - name: Publish (smoke)
+        run: dotnet publish Server/ICQ.Server.csproj --no-build -c Release -o /tmp/icq-publish

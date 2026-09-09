@@ -1,248 +1,366 @@
-using Microsoft.EntityFrameworkCore;
 using ICQ.Server.Data;
 using ICQ.Server.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace ICQ.Server.Services;
 
 public class ChatService
 {
     private readonly AppDbContext _db;
+    private readonly ILogger<ChatService> _logger;
 
-    public ChatService(AppDbContext db)
+    public ChatService(AppDbContext db, ILogger<ChatService> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
-    public async Task<List<ChatDto>> GetChatsForUserAsync(int userId)
+    public async Task<(ContactDto? Contact, string? Error)> AddContactAsync(Guid ownerId, long targetUin)
     {
-        var chats = await _db.ChatParticipants
-            .Where(cp => cp.UserId == userId)
-            .Select(cp => cp.Chat)
+        var target = await _db.Users.FirstOrDefaultAsync(u => u.Uin == targetUin);
+        if (target is null)
+            return (null, "User not found");
+
+        if (target.Id == ownerId)
+            return (null, "Cannot add yourself");
+
+        if (await _db.Contacts.AnyAsync(c => c.OwnerId == ownerId && c.ContactUserId == target.Id))
+            return (null, "Already in contacts");
+
+        var contact = new Contact
+        {
+            OwnerId = ownerId,
+            ContactUserId = target.Id,
+            Status = ContactStatus.Pending
+        };
+
+        _db.Contacts.Add(contact);
+        await _db.SaveChangesAsync();
+
+        await _db.Entry(contact).Reference(c => c.ContactUser).LoadAsync();
+
+        return (MapContact(contact), null);
+    }
+
+    public async Task<(ContactDto? Contact, string? Error)> AcceptContactAsync(Guid userId, Guid contactId)
+    {
+        var contact = await _db.Contacts
+            .Include(c => c.Owner)
+            .Include(c => c.ContactUser)
+            .FirstOrDefaultAsync(c => c.Id == contactId && c.ContactUserId == userId);
+
+        if (contact is null)
+            return (null, "Contact request not found");
+
+        contact.Status = ContactStatus.Accepted;
+
+        if (!await _db.Contacts.AnyAsync(c => c.OwnerId == userId && c.ContactUserId == contact.OwnerId))
+        {
+            _db.Contacts.Add(new Contact
+            {
+                OwnerId = userId,
+                ContactUserId = contact.OwnerId,
+                Status = ContactStatus.Accepted
+            });
+        }
+        else
+        {
+            var reverse = await _db.Contacts
+                .FirstAsync(c => c.OwnerId == userId && c.ContactUserId == contact.OwnerId);
+            reverse.Status = ContactStatus.Accepted;
+        }
+
+        await _db.SaveChangesAsync();
+        return (MapContact(contact), null);
+    }
+
+    public async Task<List<ContactDto>> GetContactsAsync(Guid userId)
+    {
+        var contacts = await _db.Contacts
+            .Include(c => c.ContactUser)
+            .Where(c => c.OwnerId == userId && c.Status != ContactStatus.Blocked)
+            .OrderBy(c => c.GroupOrder)
+            .ThenBy(c => c.ContactUser.Nickname)
+            .ToListAsync();
+
+        return contacts.Select(MapContact).ToList();
+    }
+
+    public async Task<(ChatDto? Chat, string? Error)> GetOrCreatePrivateChatAsync(Guid userId, Guid targetUserId)
+    {
+        if (userId == targetUserId)
+            return (null, "Cannot chat with yourself");
+
+        var existing = await _db.Chats
             .Include(c => c.Participants).ThenInclude(p => p.User)
-            .Include(c => c.Messages.OrderByDescending(m => m.CreatedAt).Take(1))
+            .Include(c => c.Messages.OrderByDescending(m => m.SentAt).Take(1))
+            .Where(c => c.Type == ChatType.Private)
+            .Where(c => c.Participants.Count == 2
+                        && c.Participants.Any(p => p.UserId == userId)
+                        && c.Participants.Any(p => p.UserId == targetUserId))
+            .FirstOrDefaultAsync();
+
+        if (existing is not null)
+            return (await MapChatAsync(existing, userId), null);
+
+        var target = await _db.Users.FindAsync(targetUserId);
+        if (target is null)
+            return (null, "User not found");
+
+        var chat = new Chat { Type = ChatType.Private };
+        _db.Chats.Add(chat);
+
+        _db.ChatParticipants.AddRange(
+            new ChatParticipant { Chat = chat, UserId = userId, Role = ParticipantRole.Member },
+            new ChatParticipant { Chat = chat, UserId = targetUserId, Role = ParticipantRole.Member }
+        );
+
+        await _db.SaveChangesAsync();
+
+        await _db.Entry(chat).Collection(c => c.Participants).Query()
+            .Include(p => p.User).LoadAsync();
+
+        return (await MapChatAsync(chat, userId), null);
+    }
+
+    public async Task<(ChatDto? Chat, string? Error)> CreateGroupChatAsync(Guid ownerId, string title, List<Guid> participantIds)
+    {
+        var uniqueIds = participantIds.Distinct().Where(id => id != ownerId).ToList();
+        if (uniqueIds.Count == 0)
+            return (null, "At least one other participant required");
+
+        var usersExist = await _db.Users.CountAsync(u => uniqueIds.Contains(u.Id));
+        if (usersExist != uniqueIds.Count)
+            return (null, "One or more users not found");
+
+        var chat = new Chat
+        {
+            Type = ChatType.Group,
+            Title = title.Trim()
+        };
+        _db.Chats.Add(chat);
+
+        _db.ChatParticipants.Add(new ChatParticipant
+        {
+            Chat = chat,
+            UserId = ownerId,
+            Role = ParticipantRole.Owner
+        });
+
+        foreach (var pid in uniqueIds)
+        {
+            _db.ChatParticipants.Add(new ChatParticipant
+            {
+                Chat = chat,
+                UserId = pid,
+                Role = ParticipantRole.Member
+            });
+        }
+
+        await _db.SaveChangesAsync();
+
+        await _db.Entry(chat).Collection(c => c.Participants).Query()
+            .Include(p => p.User).LoadAsync();
+
+        return (await MapChatAsync(chat, ownerId), null);
+    }
+
+    public async Task<List<ChatDto>> GetUserChatsAsync(Guid userId)
+    {
+        var chats = await _db.Chats
+            .Include(c => c.Participants).ThenInclude(p => p.User)
+            .Include(c => c.Messages.OrderByDescending(m => m.SentAt).Take(1))
+            .Where(c => c.Participants.Any(p => p.UserId == userId))
             .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .ToListAsync();
 
         var result = new List<ChatDto>();
         foreach (var chat in chats)
-        {
-            var lastMsg = chat.Messages.FirstOrDefault();
-            var unread = await _db.Messages.CountAsync(m => m.ChatId == chat.Id && m.SenderId != userId && !m.IsRead);
-            result.Add(new ChatDto
-            {
-                Id = chat.Id,
-                Title = chat.Title ?? string.Join(", ", chat.Participants.Where(p => p.UserId != userId).Select(p => p.User.Nickname)),
-                Type = chat.Type,
-                LastMessageAt = chat.LastMessageAt,
-                LastMessagePreview = lastMsg == null ? null : (lastMsg.IsEncrypted ? "🔒 Encrypted" : Smileys.Expand(lastMsg.Content).Truncate(80)),
-                Participants = chat.Participants.Select(p => ToUserDto(p.User)).ToList(),
-                UnreadCount = unread
-            });
-        }
+            result.Add(await MapChatAsync(chat, userId));
+
         return result;
     }
 
-    public async Task<ChatDto?> GetOrCreatePrivateChatAsync(int userId, int otherUserId)
+    public async Task<(MessageDto? Message, string? Error)> SendMessageAsync(Guid senderId, SendMessageRequest request)
     {
-        var existing = await _db.Chats
-            .Include(c => c.Participants).ThenInclude(p => p.User)
-            .Where(c => c.Type == "private")
-            .Where(c => c.Participants.Count == 2
-                        && c.Participants.Any(p => p.UserId == userId)
-                        && c.Participants.Any(p => p.UserId == otherUserId))
-            .FirstOrDefaultAsync();
+        var isParticipant = await _db.ChatParticipants
+            .AnyAsync(p => p.ChatId == request.ChatId && p.UserId == senderId);
 
-        if (existing != null)
+        if (!isParticipant)
+            return (null, "Not a participant of this chat");
+
+        if (!string.IsNullOrEmpty(request.ClientMessageId))
         {
-            return new ChatDto
-            {
-                Id = existing.Id,
-                Title = existing.Participants.First(p => p.UserId != userId).User.Nickname,
-                Type = existing.Type,
-                LastMessageAt = existing.LastMessageAt,
-                Participants = existing.Participants.Select(p => ToUserDto(p.User)).ToList()
-            };
+            var existing = await _db.Messages
+                .Include(m => m.Sender)
+                .FirstOrDefaultAsync(m => m.ClientMessageId == request.ClientMessageId && m.SenderId == senderId);
+            if (existing is not null)
+                return (MapMessage(existing), null);
         }
 
-        var chat = new Chat { Type = "private", CreatedAt = DateTime.UtcNow };
-        _db.Chats.Add(chat);
-        await _db.SaveChangesAsync();
-
-        _db.ChatParticipants.AddRange(
-            new ChatParticipant { ChatId = chat.Id, UserId = userId },
-            new ChatParticipant { ChatId = chat.Id, UserId = otherUserId }
-        );
-        await _db.SaveChangesAsync();
-
-        var users = await _db.Users.Where(u => u.Id == userId || u.Id == otherUserId).ToListAsync();
-        return new ChatDto
+        var message = new Message
         {
-            Id = chat.Id,
-            Title = users.First(u => u.Id == otherUserId).Nickname,
-            Type = "private",
-            Participants = users.Select(ToUserDto).ToList()
-        };
-    }
-
-    public async Task<MessageDto?> SendMessageAsync(int senderId, int chatId, string content, bool isEncrypted = false, string? encryptedPayload = null)
-    {
-        var isParticipant = await _db.ChatParticipants.AnyAsync(cp => cp.ChatId == chatId && cp.UserId == senderId);
-        if (!isParticipant) return null;
-
-        var msg = new Message
-        {
-            ChatId = chatId,
+            ChatId = request.ChatId,
             SenderId = senderId,
-            Content = content ?? string.Empty,
-            IsEncrypted = isEncrypted,
-            EncryptedPayload = encryptedPayload,
-            CreatedAt = DateTime.UtcNow
+            Type = request.Type,
+            Text = request.Text,
+            AttachmentUrl = request.AttachmentUrl,
+            AttachmentName = request.AttachmentName,
+            AttachmentSize = request.AttachmentSize,
+            ClientMessageId = request.ClientMessageId,
+            IsEncrypted = request.IsEncrypted
         };
-        _db.Messages.Add(msg);
 
-        var chat = await _db.Chats.FindAsync(chatId);
-        if (chat != null) chat.LastMessageAt = msg.CreatedAt;
+        _db.Messages.Add(message);
+
+        var chat = await _db.Chats.FindAsync(request.ChatId);
+        if (chat is not null)
+            chat.LastMessageAt = message.SentAt;
 
         await _db.SaveChangesAsync();
 
-        var sender = await _db.Users.FindAsync(senderId);
-        return new MessageDto
-        {
-            Id = msg.Id,
-            ChatId = msg.ChatId,
-            SenderId = msg.SenderId,
-            SenderNickname = sender?.Nickname ?? "",
-            Content = msg.Content,
-            IsEncrypted = msg.IsEncrypted,
-            EncryptedPayload = msg.EncryptedPayload,
-            CreatedAt = msg.CreatedAt,
-            IsRead = false
-        };
+        await _db.Entry(message).Reference(m => m.Sender).LoadAsync();
+
+        return (MapMessage(message), null);
     }
 
-    public async Task<List<MessageDto>> GetMessagesAsync(int userId, int chatId, int take = 50, int? beforeId = null)
+    public async Task<List<MessageDto>> GetMessagesAsync(Guid userId, Guid chatId, int limit = 50, DateTime? before = null)
     {
-        var isParticipant = await _db.ChatParticipants.AnyAsync(cp => cp.ChatId == chatId && cp.UserId == userId);
-        if (!isParticipant) return new List<MessageDto>();
+        var isParticipant = await _db.ChatParticipants
+            .AnyAsync(p => p.ChatId == chatId && p.UserId == userId);
+        if (!isParticipant)
+            return new List<MessageDto>();
 
-        var q = _db.Messages.Where(m => m.ChatId == chatId);
-        if (beforeId.HasValue)
-            q = q.Where(m => m.Id < beforeId.Value);
-
-        var messages = await q.OrderByDescending(m => m.Id).Take(take)
+        var query = _db.Messages
             .Include(m => m.Sender)
+            .Where(m => m.ChatId == chatId && !m.IsDeleted);
+
+        if (before.HasValue)
+            query = query.Where(m => m.SentAt < before.Value);
+
+        var messages = await query
+            .OrderByDescending(m => m.SentAt)
+            .Take(limit)
             .ToListAsync();
 
-        // mark as read
-        foreach (var m in messages.Where(m => m.SenderId != userId && !m.IsRead))
+        var participant = await _db.ChatParticipants
+            .FirstOrDefaultAsync(p => p.ChatId == chatId && p.UserId == userId);
+        if (participant is not null)
         {
-            m.IsRead = true;
-        }
-        await _db.SaveChangesAsync();
-
-        return messages.OrderBy(m => m.Id).Select(m => new MessageDto
-        {
-            Id = m.Id,
-            ChatId = m.ChatId,
-            SenderId = m.SenderId,
-            SenderNickname = m.Sender.Nickname,
-            Content = m.Content,
-            IsEncrypted = m.IsEncrypted,
-            EncryptedPayload = m.EncryptedPayload,
-            CreatedAt = m.CreatedAt,
-            IsRead = m.IsRead,
-            FileAttachmentId = m.FileAttachmentId
-        }).ToList();
-    }
-
-    public async Task<List<int>> GetChatParticipantIdsAsync(int chatId)
-    {
-        return await _db.ChatParticipants.Where(cp => cp.ChatId == chatId).Select(cp => cp.UserId).ToListAsync();
-    }
-
-    public async Task SetOnlineStatusAsync(int userId, bool isOnline)
-    {
-        var user = await _db.Users.FindAsync(userId);
-        if (user == null) return;
-        user.IsOnline = isOnline;
-        user.Status = isOnline ? "online" : "offline";
-        user.LastSeenAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-    }
-
-    public async Task SetUserStatusAsync(int userId, string status)
-    {
-        var user = await _db.Users.FindAsync(userId);
-        if (user == null) return;
-        user.Status = status;
-        if (status == "offline") user.IsOnline = false;
-        else user.IsOnline = true;
-        user.LastSeenAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-    }
-
-    public async Task<List<UserDto>> SearchUsersAsync(string query, int currentUserId, int take = 20)
-    {
-        query = query.Trim();
-        if (string.IsNullOrEmpty(query)) return new();
-
-        var q = _db.Users.AsQueryable().Where(u => u.Id != currentUserId);
-        if (int.TryParse(query, out var uin))
-            q = q.Where(u => u.Uin == uin || u.Nickname.Contains(query) || u.Email.Contains(query));
-        else
-            q = q.Where(u => u.Nickname.Contains(query) || u.Email.Contains(query));
-
-        return await q.Take(take).Select(u => ToUserDto(u)).ToListAsync();
-    }
-
-    public async Task<List<UserDto>> GetContactsAsync(int userId)
-    {
-        return await _db.Contacts
-            .Where(c => c.OwnerId == userId)
-            .Include(c => c.ContactUser)
-            .Select(c => ToUserDto(c.ContactUser))
-            .ToListAsync();
-    }
-
-    public async Task<UserDto?> AddContactAsync(int ownerId, AddContactRequest req)
-    {
-        User? target = null;
-        if (req.Uin.HasValue)
-            target = await _db.Users.FirstOrDefaultAsync(u => u.Uin == req.Uin.Value);
-        else if (!string.IsNullOrEmpty(req.Email))
-            target = await _db.Users.FirstOrDefaultAsync(u => u.Email == req.Email);
-
-        if (target == null || target.Id == ownerId) return null;
-
-        var exists = await _db.Contacts.AnyAsync(c => c.OwnerId == ownerId && c.ContactUserId == target.Id);
-        if (!exists)
-        {
-            _db.Contacts.Add(new Contact
-            {
-                OwnerId = ownerId,
-                ContactUserId = target.Id,
-                Nickname = req.Nickname ?? target.Nickname
-            });
+            participant.LastReadAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
         }
-        return ToUserDto(target);
+
+        return messages.OrderBy(m => m.SentAt).Select(MapMessage).ToList();
     }
 
-    private static UserDto ToUserDto(User u) => new()
+    public async Task<List<UserDto>> SearchUsersAsync(string query, Guid currentUserId, int limit = 20)
     {
-        Id = u.Id,
-        Uin = u.Uin,
-        Email = u.Email,
-        Nickname = u.Nickname,
-        Status = u.Status,
-        StatusMessage = u.StatusMessage,
-        IsOnline = u.IsOnline,
-        LastSeenAt = u.LastSeenAt
-    };
-}
+        query = query.Trim().ToLower();
+        if (string.IsNullOrEmpty(query))
+            return new List<UserDto>();
 
-internal static class StringExt
-{
-    public static string Truncate(this string s, int max) =>
-        string.IsNullOrEmpty(s) ? s : (s.Length <= max ? s : s[..max] + "…");
+        long? uinQuery = long.TryParse(query, out var u) ? u : null;
+
+        var users = await _db.Users
+            .Where(u => u.Id != currentUserId &&
+                        (u.Nickname.ToLower().Contains(query) ||
+                         (uinQuery.HasValue && u.Uin == uinQuery.Value) ||
+                         (u.FirstName != null && u.FirstName.ToLower().Contains(query)) ||
+                         (u.LastName != null && u.LastName.ToLower().Contains(query))))
+            .OrderBy(u => u.Nickname)
+            .Take(limit)
+            .ToListAsync();
+
+        return users.Select(AuthService.MapToDto).ToList();
+    }
+
+    public async Task UpdateUserStatusAsync(Guid userId, UserStatus status, string? statusMessage = null)
+    {
+        var user = await _db.Users.FindAsync(userId);
+        if (user is null) return;
+
+        user.Status = status;
+        if (statusMessage is not null)
+            user.StatusMessage = statusMessage;
+        user.LastSeenAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+    }
+
+    private static ContactDto MapContact(Contact c) => new(
+        c.Id,
+        AuthService.MapToDto(c.ContactUser),
+        c.NicknameOverride,
+        c.Status,
+        c.AddedAt
+    );
+
+    private async Task<ChatDto> MapChatAsync(Chat chat, Guid currentUserId)
+    {
+        var participants = chat.Participants
+            .Select(p => AuthService.MapToDto(p.User))
+            .ToList();
+
+        MessageDto? lastMessage = null;
+        if (chat.Messages.Any())
+        {
+            var msg = chat.Messages.First();
+            if (msg.Sender is null)
+                await _db.Entry(msg).Reference(m => m.Sender).LoadAsync();
+            lastMessage = MapMessage(msg);
+        }
+
+        var participant = chat.Participants.FirstOrDefault(p => p.UserId == currentUserId);
+        var unread = 0;
+        if (participant?.LastReadAt is not null)
+        {
+            unread = await _db.Messages.CountAsync(m =>
+                m.ChatId == chat.Id &&
+                m.SentAt > participant.LastReadAt &&
+                m.SenderId != currentUserId &&
+                !m.IsDeleted);
+        }
+        else if (participant is not null)
+        {
+            unread = await _db.Messages.CountAsync(m =>
+                m.ChatId == chat.Id &&
+                m.SenderId != currentUserId &&
+                !m.IsDeleted);
+        }
+
+        string? title = chat.Title;
+        if (chat.Type == ChatType.Private && string.IsNullOrEmpty(title))
+        {
+            var other = chat.Participants.FirstOrDefault(p => p.UserId != currentUserId);
+            title = other?.User.Nickname;
+        }
+
+        return new ChatDto(
+            chat.Id,
+            chat.Type,
+            title,
+            chat.CreatedAt,
+            chat.LastMessageAt,
+            participants,
+            lastMessage,
+            unread
+        );
+    }
+
+    private static MessageDto MapMessage(Message m) => new(
+        m.Id,
+        m.ChatId,
+        m.SenderId,
+        m.Sender?.Nickname ?? "?",
+        m.Type,
+        m.Text,
+        m.AttachmentUrl,
+        m.AttachmentName,
+        m.AttachmentSize,
+        m.SentAt,
+        m.EditedAt,
+        m.IsDeleted,
+        m.ClientMessageId,
+        m.IsEncrypted
+    );
 }

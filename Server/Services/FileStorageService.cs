@@ -12,28 +12,36 @@ public class FileStorageService
         ".doc", ".docx", ".xls", ".xlsx",
         ".mp3", ".ogg", ".wav", ".mp4", ".webm"
     };
-    private const long MaxFileSizeBytes = 25 * 1024 * 1024;
+    private const long MaxFileSizeBytes = 25 * 1024 * 1024; // 25 MB
 
     public FileStorageService(IConfiguration config, ILogger<FileStorageService> logger)
     {
         _storagePath = config["FileStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
         _baseUrl = config["FileStorage:BaseUrl"] ?? "/uploads";
         _logger = logger;
+
         Directory.CreateDirectory(_storagePath);
     }
 
     public async Task<(string Url, string FileName, long Size)?> SaveAsync(IFormFile file, Guid userId)
     {
-        if (file.Length == 0 || file.Length > MaxFileSizeBytes) return null;
+        if (file.Length == 0 || file.Length > MaxFileSizeBytes)
+            return null;
+
         var ext = Path.GetExtension(file.FileName);
-        if (string.IsNullOrEmpty(ext) || !AllowedExtensions.Contains(ext)) return null;
+        if (string.IsNullOrEmpty(ext) || !AllowedExtensions.Contains(ext))
+            return null;
 
         var safeName = $"{userId:N}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid():N}{ext}";
         var fullPath = Path.Combine(_storagePath, safeName);
+
         await using var stream = new FileStream(fullPath, FileMode.Create);
         await file.CopyToAsync(stream);
+
         _logger.LogInformation("Saved file {File} ({Size} bytes) for user {UserId}", safeName, file.Length, userId);
-        return ($"{_baseUrl.TrimEnd('/')}/{safeName}", file.FileName, file.Length);
+
+        var url = $"{_baseUrl.TrimEnd('/')}/{safeName}";
+        return (url, file.FileName, file.Length);
     }
 
     public bool Delete(string relativeOrFileName)

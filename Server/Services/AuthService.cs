@@ -2,10 +2,10 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using ICQ.Server.Data;
 using ICQ.Server.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 namespace ICQ.Server.Services;
 
@@ -13,154 +13,162 @@ public class AuthService
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly ILogger<AuthService> _logger;
 
-    public AuthService(AppDbContext db, IConfiguration config)
+    public AuthService(AppDbContext db, IConfiguration config, ILogger<AuthService> logger)
     {
         _db = db;
         _config = config;
+        _logger = logger;
     }
 
-    public async Task<AuthResponse?> RegisterAsync(RegisterRequest req)
+    public async Task<(AuthResponse? Response, string? Error)> RegisterAsync(RegisterRequest request)
     {
-        if (await _db.Users.AnyAsync(u => u.Email == req.Email))
-            return null;
+        var nickname = request.Nickname.Trim();
+        if (await _db.Users.AnyAsync(u => u.Nickname.ToLower() == nickname.ToLower()))
+            return (null, "Nickname already taken");
 
-        var uin = await GenerateUniqueUinAsync();
+        if (!string.IsNullOrWhiteSpace(request.Email) &&
+            await _db.Users.AnyAsync(u => u.Email != null && u.Email.ToLower() == request.Email.ToLower()))
+            return (null, "Email already registered");
+
+        // Generate sequential UIN (starting from 100000 like classic ICQ)
+        var maxUin = await _db.Users.MaxAsync(u => (long?)u.Uin) ?? 99999;
+        var uin = maxUin + 1;
+
         var user = new User
         {
             Uin = uin,
-            Email = req.Email.Trim().ToLowerInvariant(),
-            PasswordHash = HashPassword(req.Password),
-            Nickname = req.Nickname.Trim(),
-            Status = "online",
-            IsOnline = true,
-            CreatedAt = DateTime.UtcNow
+            Nickname = nickname,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            Email = request.Email?.Trim(),
+            FirstName = request.FirstName?.Trim(),
+            LastName = request.LastName?.Trim(),
+            Status = UserStatus.Offline
         };
+
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
 
-        return await IssueTokensAsync(user);
+        _logger.LogInformation("New user registered: {Nickname} (UIN {Uin})", user.Nickname, user.Uin);
+
+        return (await GenerateAuthResponseAsync(user), null);
     }
 
-    public async Task<AuthResponse?> LoginAsync(LoginRequest req)
+    public async Task<(AuthResponse? Response, string? Error)> LoginAsync(LoginRequest request)
     {
-        User? user = null;
-        if (int.TryParse(req.EmailOrUin, out var uin))
-            user = await _db.Users.FirstOrDefaultAsync(u => u.Uin == uin);
-        if (user == null)
-            user = await _db.Users.FirstOrDefaultAsync(u => u.Email == req.EmailOrUin.Trim().ToLowerInvariant());
+        var login = request.NicknameOrEmail.Trim().ToLower();
 
-        if (user == null || !VerifyPassword(req.Password, user.PasswordHash))
-            return null;
+        var user = await _db.Users
+            .FirstOrDefaultAsync(u =>
+                u.Nickname.ToLower() == login ||
+                (u.Email != null && u.Email.ToLower() == login));
 
-        user.IsOnline = true;
-        user.Status = "online";
+        if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+            return (null, "Invalid credentials");
+
         user.LastSeenAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        return await IssueTokensAsync(user);
+        return (await GenerateAuthResponseAsync(user), null);
     }
 
-    public async Task<AuthResponse?> RefreshAsync(string refreshToken)
+    public async Task<(AuthResponse? Response, string? Error)> RefreshAsync(string refreshToken)
     {
-        var rt = await _db.RefreshTokens
+        var token = await _db.RefreshTokens
             .Include(t => t.User)
-            .FirstOrDefaultAsync(t => t.Token == refreshToken && !t.IsRevoked && t.ExpiresAt > DateTime.UtcNow);
-        if (rt == null) return null;
+            .FirstOrDefaultAsync(t => t.Token == refreshToken && !t.IsRevoked);
 
-        rt.IsRevoked = true;
+        if (token is null || token.ExpiresAt < DateTime.UtcNow)
+            return (null, "Invalid or expired refresh token");
+
+        // Rotate refresh token
+        token.IsRevoked = true;
         await _db.SaveChangesAsync();
-        return await IssueTokensAsync(rt.User);
+
+        return (await GenerateAuthResponseAsync(token.User), null);
     }
 
-    private async Task<AuthResponse> IssueTokensAsync(User user)
+    public async Task RevokeRefreshTokenAsync(string refreshToken)
     {
-        var access = GenerateJwt(user);
-        var refresh = GenerateRefreshToken();
-        _db.RefreshTokens.Add(new RefreshToken
+        var token = await _db.RefreshTokens.FirstOrDefaultAsync(t => t.Token == refreshToken);
+        if (token is not null)
+        {
+            token.IsRevoked = true;
+            await _db.SaveChangesAsync();
+        }
+    }
+
+    private async Task<AuthResponse> GenerateAuthResponseAsync(User user)
+    {
+        var accessToken = GenerateJwt(user);
+        var expiresAt = DateTime.UtcNow.AddMinutes(
+            double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60"));
+
+        var refreshToken = new RefreshToken
         {
             UserId = user.Id,
-            Token = refresh,
-            ExpiresAt = DateTime.UtcNow.AddDays(30),
-            CreatedAt = DateTime.UtcNow
-        });
+            Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
+            ExpiresAt = DateTime.UtcNow.AddDays(
+                double.Parse(_config["Jwt:RefreshTokenDays"] ?? "30"))
+        };
+
+        _db.RefreshTokens.Add(refreshToken);
         await _db.SaveChangesAsync();
 
-        return new AuthResponse
-        {
-            AccessToken = access,
-            RefreshToken = refresh,
-            ExpiresIn = 3600 * 24,
-            User = new UserDto
-            {
-                Id = user.Id,
-                Uin = user.Uin,
-                Email = user.Email,
-                Nickname = user.Nickname,
-                Status = user.Status,
-                StatusMessage = user.StatusMessage,
-                IsOnline = user.IsOnline,
-                LastSeenAt = user.LastSeenAt
-            }
-        };
+        return new AuthResponse(
+            accessToken,
+            refreshToken.Token,
+            expiresAt,
+            MapToDto(user)
+        );
     }
 
     private string GenerateJwt(User user)
     {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var key = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(_config["Jwt:Key"]
+                ?? throw new InvalidOperationException("Jwt:Key is not configured")));
+
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
         var claims = new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim("sub", user.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.UniqueName, user.Nickname),
             new Claim("uin", user.Uin.ToString()),
-            new Claim(ClaimTypes.Name, user.Nickname),
-            new Claim(ClaimTypes.Email, user.Email)
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: _config["Jwt:Issuer"] ?? "ICQ.Server",
+            audience: _config["Jwt:Audience"] ?? "ICQ.Client",
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(24),
-            signingCredentials: creds
+            expires: DateTime.UtcNow.AddMinutes(
+                double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60")),
+            signingCredentials: credentials
         );
+
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private static string GenerateRefreshToken()
-    {
-        var bytes = new byte[64];
-        RandomNumberGenerator.Fill(bytes);
-        return Convert.ToBase64String(bytes);
-    }
+    public static UserDto MapToDto(User user) => new(
+        user.Id,
+        user.Uin,
+        user.Nickname,
+        user.Email,
+        user.FirstName,
+        user.LastName,
+        user.StatusMessage,
+        user.Status,
+        user.LastSeenAt,
+        user.AvatarUrl
+    );
 
-    private async Task<int> GenerateUniqueUinAsync()
+    public Guid? GetUserIdFromPrincipal(ClaimsPrincipal principal)
     {
-        var rnd = new Random();
-        int uin;
-        do
-        {
-            uin = rnd.Next(100000, 99999999);
-        } while (await _db.Users.AnyAsync(u => u.Uin == uin));
-        return uin;
-    }
-
-    private static string HashPassword(string password)
-    {
-        using var rng = RandomNumberGenerator.Create();
-        var salt = new byte[16];
-        rng.GetBytes(salt);
-        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100000, HashAlgorithmName.SHA256, 32);
-        return $"{Convert.ToBase64String(salt)}.{Convert.ToBase64String(hash)}";
-    }
-
-    private static bool VerifyPassword(string password, string stored)
-    {
-        var parts = stored.Split('.');
-        if (parts.Length != 2) return false;
-        var salt = Convert.FromBase64String(parts[0]);
-        var hash = Convert.FromBase64String(parts[1]);
-        var test = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100000, HashAlgorithmName.SHA256, 32);
-        return CryptographicOperations.FixedTimeEquals(hash, test);
+        var sub = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+                  ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+        return Guid.TryParse(sub, out var id) ? id : null;
     }
 }
