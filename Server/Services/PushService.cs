@@ -1,18 +1,13 @@
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using ICQ.Server.Data;
 using ICQ.Server.Models;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
 namespace ICQ.Server.Services;
 
-/// <summary>
-/// Push notifications via Firebase Cloud Messaging (FCM).
-/// Register device tokens with POST /api/push/register.
-/// When credentials are not configured, pushes are no-ops (logged only).
-/// </summary>
-public class PushService
+public class PushService : IPushService
 {
     private readonly AppDbContext _db;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -122,7 +117,6 @@ public class PushService
 
         var client = _httpClientFactory.CreateClient();
         var request = new HttpRequestMessage(HttpMethod.Post, "https://fcm.googleapis.com/fcm/send");
-        // FCM legacy API expects exactly: Authorization: key=<ServerKey>
         request.Headers.TryAddWithoutValidation("Authorization", "key=" + serverKey);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
