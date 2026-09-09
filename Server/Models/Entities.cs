@@ -5,32 +5,92 @@ namespace ICQ.Server.Models;
 
 public class User
 {
-    public int Id { get; set; }
-    public int Uin { get; set; }
-    [MaxLength(128)]
-    public string Email { get; set; } = string.Empty;
-    [MaxLength(256)]
-    public string PasswordHash { get; set; } = string.Empty;
-    [MaxLength(64)]
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>UIN-like numeric ID (auto-increment style, but GUID primary)</summary>
+    [Required]
+    public long Uin { get; set; }
+
+    [Required, MaxLength(64)]
     public string Nickname { get; set; } = string.Empty;
-    [MaxLength(32)]
-    public string Status { get; set; } = "offline";
+
+    [Required, MaxLength(256)]
+    public string PasswordHash { get; set; } = string.Empty;
+
     [MaxLength(256)]
+    public string? Email { get; set; }
+
+    [MaxLength(128)]
+    public string? FirstName { get; set; }
+
+    [MaxLength(128)]
+    public string? LastName { get; set; }
+
+    [MaxLength(512)]
     public string? StatusMessage { get; set; }
+
+    public UserStatus Status { get; set; } = UserStatus.Offline;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastSeenAt { get; set; }
-    public bool IsOnline { get; set; }
+
+    [MaxLength(512)]
+    public string? AvatarUrl { get; set; }
 
     public ICollection<Contact> Contacts { get; set; } = new List<Contact>();
+    public ICollection<ChatParticipant> ChatParticipants { get; set; } = new List<ChatParticipant>();
+    public ICollection<Message> SentMessages { get; set; } = new List<Message>();
+}
+
+public enum UserStatus
+{
+    Offline = 0,
+    Online = 1,
+    Away = 2,
+    Busy = 3,
+    Invisible = 4
+}
+
+public class Contact
+{
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid OwnerId { get; set; }
+    public User Owner { get; set; } = null!;
+
+    public Guid ContactUserId { get; set; }
+    public User ContactUser { get; set; } = null!;
+
+    [MaxLength(64)]
+    public string? NicknameOverride { get; set; }
+
+    public ContactStatus Status { get; set; } = ContactStatus.Pending;
+
+    public DateTime AddedAt { get; set; } = DateTime.UtcNow;
+
+    public int GroupOrder { get; set; } = 0;
+}
+
+public enum ContactStatus
+{
+    Pending = 0,
+    Accepted = 1,
+    Blocked = 2,
+    Denied = 3
 }
 
 public class Chat
 {
-    public int Id { get; set; }
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public ChatType Type { get; set; } = ChatType.Private;
+
     [MaxLength(128)]
     public string? Title { get; set; }
-    [MaxLength(16)]
-    public string Type { get; set; } = "private"; // private | group
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastMessageAt { get; set; }
 
@@ -38,100 +98,150 @@ public class Chat
     public ICollection<Message> Messages { get; set; } = new List<Message>();
 }
 
+public enum ChatType
+{
+    Private = 0,
+    Group = 1,
+    Channel = 2
+}
+
 public class ChatParticipant
 {
-    public int ChatId { get; set; }
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ChatId { get; set; }
     public Chat Chat { get; set; } = null!;
-    public int UserId { get; set; }
+
+    public Guid UserId { get; set; }
     public User User { get; set; } = null!;
+
+    public ParticipantRole Role { get; set; } = ParticipantRole.Member;
+
     public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
-    public bool IsAdmin { get; set; }
+    public DateTime? LastReadAt { get; set; }
+
+    public bool IsMuted { get; set; } = false;
+}
+
+public enum ParticipantRole
+{
+    Member = 0,
+    Admin = 1,
+    Owner = 2
 }
 
 public class Message
 {
-    public int Id { get; set; }
-    public int ChatId { get; set; }
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ChatId { get; set; }
     public Chat Chat { get; set; } = null!;
-    public int SenderId { get; set; }
+
+    public Guid SenderId { get; set; }
     public User Sender { get; set; } = null!;
-    [MaxLength(8000)]
-    public string Content { get; set; } = string.Empty;
-    public bool IsEncrypted { get; set; }
-    [MaxLength(16000)]
-    public string? EncryptedPayload { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public bool IsRead { get; set; }
-    public int? FileAttachmentId { get; set; }
+
+    public MessageType Type { get; set; } = MessageType.Text;
+
+    [MaxLength(8192)]
+    public string? Text { get; set; }
+
+    [MaxLength(1024)]
+    public string? AttachmentUrl { get; set; }
+
+    [MaxLength(256)]
+    public string? AttachmentName { get; set; }
+
+    public long? AttachmentSize { get; set; }
+
+    public DateTime SentAt { get; set; } = DateTime.UtcNow;
+    public DateTime? EditedAt { get; set; }
+
+    public bool IsDeleted { get; set; } = false;
+
+    /// <summary>True if Text is ciphertext (E2E)</summary>
+    public bool IsEncrypted { get; set; } = false;
+
+    /// <summary>Client-generated ID for optimistic UI and deduplication</summary>
+    [MaxLength(64)]
+    public string? ClientMessageId { get; set; }
 }
 
-public class Contact
+public enum MessageType
 {
-    public int OwnerId { get; set; }
-    public User Owner { get; set; } = null!;
-    public int ContactUserId { get; set; }
-    public User ContactUser { get; set; } = null!;
-    [MaxLength(64)]
-    public string? Nickname { get; set; }
-    public DateTime AddedAt { get; set; } = DateTime.UtcNow;
+    Text = 0,
+    Image = 1,
+    File = 2,
+    System = 3,
+    Sticker = 4
 }
 
 public class RefreshToken
 {
-    public int Id { get; set; }
-    public int UserId { get; set; }
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid UserId { get; set; }
     public User User { get; set; } = null!;
-    [MaxLength(256)]
+
+    [Required, MaxLength(256)]
     public string Token { get; set; } = string.Empty;
+
     public DateTime ExpiresAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public bool IsRevoked { get; set; }
+    public bool IsRevoked { get; set; } = false;
+}
+
+public class DeviceToken
+{
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+
+    [Required, MaxLength(512)]
+    public string Token { get; set; } = string.Empty;
+
+    /// <summary>ios | android | macos</summary>
+    [MaxLength(32)]
+    public string Platform { get; set; } = "unknown";
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class WebPushSubscription
+{
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+
+    [Required, MaxLength(2048)]
+    public string Endpoint { get; set; } = string.Empty;
+
+    [Required, MaxLength(512)]
+    public string P256dh { get; set; } = string.Empty;
+
+    [Required, MaxLength(256)]
+    public string Auth { get; set; } = string.Empty;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public class UserKeyBundle
 {
-    public int UserId { get; set; }
+    [Key]
+    public Guid UserId { get; set; }
     public User User { get; set; } = null!;
-    [MaxLength(256)]
-    public string IdentityKeyPublic { get; set; } = string.Empty;
-    [MaxLength(256)]
-    public string SignedPreKeyPublic { get; set; } = string.Empty;
-    [MaxLength(512)]
-    public string SignedPreKeySignature { get; set; } = string.Empty;
-    public int SignedPreKeyId { get; set; }
-    [MaxLength(8000)]
-    public string? OneTimePreKeysJson { get; set; }
+
+    /// <summary>Base64 SPKI public key (ECDH P-256)</summary>
+    [Required, MaxLength(512)]
+    public string IdentityPublicKey { get; set; } = string.Empty;
+
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-}
-
-public class PushSubscription
-{
-    public int Id { get; set; }
-    public int UserId { get; set; }
-    public User User { get; set; } = null!;
-    [MaxLength(1024)]
-    public string Endpoint { get; set; } = string.Empty;
-    [MaxLength(256)]
-    public string P256dh { get; set; } = string.Empty;
-    [MaxLength(128)]
-    public string Auth { get; set; } = string.Empty;
-    [MaxLength(32)]
-    public string Platform { get; set; } = "web"; // web | android | ios
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-}
-
-public class FileAttachment
-{
-    public int Id { get; set; }
-    public int? MessageId { get; set; }
-    public Message? Message { get; set; }
-    [MaxLength(256)]
-    public string FileName { get; set; } = string.Empty;
-    [MaxLength(128)]
-    public string ContentType { get; set; } = string.Empty;
-    public long Size { get; set; }
-    [MaxLength(512)]
-    public string StoragePath { get; set; } = string.Empty;
-    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
-    public int UploaderId { get; set; }
 }
