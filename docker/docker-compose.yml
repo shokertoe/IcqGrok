@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: icq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: icq
+      POSTGRES_PASSWORD: icq_secret_change_me
+      POSTGRES_DB: icq
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U icq -d icq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: ../Server
+      dockerfile: ../docker/Dockerfile
+    container_name: icq-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=icq;Username=icq;Password=icq_secret_change_me"
+      Jwt__Key: "ICQ_Production_Secret_Key_Change_This_To_Something_Long_And_Random_64chars!"
+      Jwt__Issuer: "ICQ.Server"
+      Jwt__Audience: "ICQ.Client"
+      Jwt__AccessTokenMinutes: "120"
+      Jwt__RefreshTokenDays: "30"
+      FileStorage__Path: "/app/uploads"
+      FileStorage__BaseUrl: "http://localhost:8080/uploads"
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/app/uploads
+
+volumes:
+  pgdata:
+  uploads:
