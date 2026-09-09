@@ -2,6 +2,7 @@ using System.Text;
 using ICQ.Server.Data;
 using ICQ.Server.Hubs;
 using ICQ.Server.Services;
+using ICQ.Server.Services.Abstractions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -36,11 +37,13 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
         opt.UseSqlite(connStr);
 });
 
-builder.Services.AddScoped<AuthService>();
-builder.Services.AddScoped<ChatService>();
-builder.Services.AddSingleton<FileStorageService>();
-builder.Services.AddScoped<PushService>();
-builder.Services.AddScoped<WebPushService>();
+// Program to interfaces (DIP) — swap implementations without changing controllers/hub
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddSingleton<IFileStorageService, FileStorageService>();
+builder.Services.AddScoped<IPushService, PushService>();
+builder.Services.AddScoped<IWebPushService, WebPushService>();
+builder.Services.AddSingleton<IPresenceTracker, InMemoryPresenceTracker>();
 builder.Services.AddHttpClient();
 
 var jwtKey = builder.Configuration["Jwt:Key"];
