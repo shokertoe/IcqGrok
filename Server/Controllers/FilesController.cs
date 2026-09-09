@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ICQ.Server.Controllers;
 
+/// <summary>
+/// Загрузка файлов и изображений (multipart). URL можно передать в SendMessage.
+/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
@@ -21,10 +24,13 @@ public class FilesController : ControllerBase
 
     [HttpPost("upload")]
     [RequestSizeLimit(26_214_400)]
+    [ProducesResponseType(typeof(UploadResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<UploadResponse>> Upload(IFormFile file)
     {
         var userId = _auth.GetUserIdFromPrincipal(User);
         if (userId is null) return Unauthorized();
+
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file provided" });
 
@@ -34,6 +40,7 @@ public class FilesController : ControllerBase
 
         var (url, name, size) = result.Value;
         var isImage = IsImage(name);
+
         return Ok(new UploadResponse(url, name, size, isImage ? MessageType.Image : MessageType.File));
     }
 
@@ -44,4 +51,9 @@ public class FilesController : ControllerBase
     }
 }
 
-public record UploadResponse(string Url, string FileName, long Size, MessageType SuggestedType);
+public record UploadResponse(
+    string Url,
+    string FileName,
+    long Size,
+    MessageType SuggestedType
+);

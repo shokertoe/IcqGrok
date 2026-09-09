@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ICQ.Server.Controllers;
 
+/// <summary>
+/// Поиск пользователей, контакты и статус присутствия (ICQ-style).
+/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
@@ -23,21 +26,29 @@ public class UsersController : ControllerBase
         ?? throw new UnauthorizedAccessException();
 
     [HttpGet("search")]
-    public async Task<ActionResult<SearchUsersResponse>> Search([FromQuery] string q, [FromQuery] int limit = 20)
+    [ProducesResponseType(typeof(SearchUsersResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SearchUsersResponse>> Search(
+        [FromQuery] string q,
+        [FromQuery] int limit = 20)
     {
         if (string.IsNullOrWhiteSpace(q))
             return Ok(new SearchUsersResponse(new List<UserDto>()));
+
         var users = await _chats.SearchUsersAsync(q, UserId, limit);
         return Ok(new SearchUsersResponse(users));
     }
 
     [HttpGet("contacts")]
+    [ProducesResponseType(typeof(List<ContactDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<ContactDto>>> GetContacts()
     {
-        return Ok(await _chats.GetContactsAsync(UserId));
+        var contacts = await _chats.GetContactsAsync(UserId);
+        return Ok(contacts);
     }
 
     [HttpPost("contacts")]
+    [ProducesResponseType(typeof(ContactDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ContactDto>> AddContact([FromBody] AddContactRequest request)
     {
         var (contact, error) = await _chats.AddContactAsync(UserId, request.TargetUin);
@@ -46,6 +57,8 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("contacts/{contactId:guid}/accept")]
+    [ProducesResponseType(typeof(ContactDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ContactDto>> AcceptContact(Guid contactId)
     {
         var (contact, error) = await _chats.AcceptContactAsync(UserId, contactId);
@@ -54,6 +67,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPut("status")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateStatus([FromBody] UpdateStatusRequest request)
     {
         await _chats.UpdateUserStatusAsync(UserId, request.Status, request.StatusMessage);

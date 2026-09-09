@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ICQ.Server.Controllers;
 
+/// <summary>
+/// Чаты и сообщения: список диалогов, личные/групповые чаты, история и отправка.
+/// </summary>
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
@@ -23,6 +26,7 @@ public class ChatsController : ControllerBase
         ?? throw new UnauthorizedAccessException();
 
     [HttpGet]
+    [ProducesResponseType(typeof(List<ChatDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<ChatDto>>> GetMyChats()
     {
         var list = await _chats.GetUserChatsAsync(UserId);
@@ -30,6 +34,8 @@ public class ChatsController : ControllerBase
     }
 
     [HttpPost("private")]
+    [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ChatDto>> CreatePrivate([FromBody] CreatePrivateChatRequest request)
     {
         var (chat, error) = await _chats.GetOrCreatePrivateChatAsync(UserId, request.TargetUserId);
@@ -38,6 +44,8 @@ public class ChatsController : ControllerBase
     }
 
     [HttpPost("group")]
+    [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ChatDto>> CreateGroup([FromBody] CreateGroupChatRequest request)
     {
         var (chat, error) = await _chats.CreateGroupChatAsync(UserId, request.Title, request.ParticipantIds);
@@ -46,6 +54,7 @@ public class ChatsController : ControllerBase
     }
 
     [HttpGet("{chatId:guid}/messages")]
+    [ProducesResponseType(typeof(List<MessageDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<MessageDto>>> GetMessages(
         Guid chatId,
         [FromQuery] int limit = 50,
@@ -56,6 +65,8 @@ public class ChatsController : ControllerBase
     }
 
     [HttpPost("messages")]
+    [ProducesResponseType(typeof(MessageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<MessageDto>> SendMessage([FromBody] SendMessageRequest request)
     {
         var (message, error) = await _chats.SendMessageAsync(UserId, request);
