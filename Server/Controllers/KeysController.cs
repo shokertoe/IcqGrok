@@ -24,6 +24,7 @@ public class KeysController : ControllerBase
         _auth = auth;
     }
 
+    /// <summary>Загрузить или обновить свой ECDH public identity key.</summary>
     [HttpPut("bundle")]
     [ProducesResponseType(typeof(KeyBundleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -56,6 +57,8 @@ public class KeysController : ControllerBase
         return Ok(new KeyBundleDto(bundle.UserId, bundle.IdentityPublicKey, bundle.UpdatedAt));
     }
 
+    /// <summary>Публичный ключ другого пользователя (для установки E2E-сессии).</summary>
+    /// <param name="userId">Id пользователя.</param>
     [HttpGet("bundle/{userId:guid}")]
     [ProducesResponseType(typeof(KeyBundleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -68,6 +71,7 @@ public class KeysController : ControllerBase
         return Ok(new KeyBundleDto(bundle.UserId, bundle.IdentityPublicKey, bundle.UpdatedAt));
     }
 
+    /// <summary>Есть ли у текущего пользователя загруженный key bundle.</summary>
     [HttpGet("me")]
     public async Task<ActionResult<object>> Me()
     {

@@ -8,6 +8,7 @@ public static class SmileyPack
 {
     public static readonly IReadOnlyDictionary<string, string> Map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
+        // Classic faces
         [":)"] = "🙂",
         [":-)"] = "🙂",
         [":("] = "🙁",
@@ -48,6 +49,8 @@ public static class SmileyPack
         [">:-("] = "😡",
         [":X"] = "🤐",
         [":-X"] = "🤐",
+
+        // ICQ classics & fun
         ["*JOKINGLY*"] = "😜",
         ["*KISSING*"] = "💋",
         ["*STOP*"] = "🛑",
@@ -75,6 +78,8 @@ public static class SmileyPack
         ["*IDEA*"] = "💡",
         ["*BOMB*"] = "💣",
         ["*FIRE*"] = "🔥",
+
+        // The legendary headbanging-against-the-wall smiley
         ["*BANG*"] = "🤦‍♂️",
         ["*HEADBANG*"] = "🤦‍♂️",
         [":bang:"] = "🤦‍♂️",
@@ -90,6 +95,7 @@ public static class SmileyPack
     {
         if (string.IsNullOrEmpty(text)) return text ?? "";
         var result = text;
+        // Longer codes first so *HEADBANG* wins over partial matches
         foreach (var kv in Map.OrderByDescending(k => k.Key.Length))
             result = result.Replace(kv.Key, kv.Value, StringComparison.OrdinalIgnoreCase);
         return result;

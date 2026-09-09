@@ -25,6 +25,9 @@ public class ChatsController : ControllerBase
     private Guid UserId => _auth.GetUserIdFromPrincipal(User)
         ?? throw new UnauthorizedAccessException();
 
+    /// <summary>
+    /// Список чатов текущего пользователя.
+    /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(List<ChatDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<ChatDto>>> GetMyChats()
@@ -33,6 +36,10 @@ public class ChatsController : ControllerBase
         return Ok(list);
     }
 
+    /// <summary>
+    /// Создать или получить существующий личный чат с пользователем.
+    /// </summary>
+    /// <param name="request">Id собеседника.</param>
     [HttpPost("private")]
     [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -43,6 +50,10 @@ public class ChatsController : ControllerBase
         return Ok(chat);
     }
 
+    /// <summary>
+    /// Создать групповой чат.
+    /// </summary>
+    /// <param name="request">Название и участники.</param>
     [HttpPost("group")]
     [ProducesResponseType(typeof(ChatDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -53,6 +64,12 @@ public class ChatsController : ControllerBase
         return Ok(chat);
     }
 
+    /// <summary>
+    /// История сообщений чата (пагинация по <paramref name="before"/>).
+    /// </summary>
+    /// <param name="chatId">Id чата.</param>
+    /// <param name="limit">Максимум сообщений (по умолчанию 50).</param>
+    /// <param name="before">Вернуть сообщения старше этой даты (UTC).</param>
     [HttpGet("{chatId:guid}/messages")]
     [ProducesResponseType(typeof(List<MessageDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<MessageDto>>> GetMessages(
@@ -64,6 +81,10 @@ public class ChatsController : ControllerBase
         return Ok(messages);
     }
 
+    /// <summary>
+    /// Отправить сообщение (текст, файл, E2E-ciphertext).
+    /// </summary>
+    /// <param name="request">Содержимое сообщения и id чата.</param>
     [HttpPost("messages")]
     [ProducesResponseType(typeof(MessageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

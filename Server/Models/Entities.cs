@@ -3,6 +3,10 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ICQ.Server.Models;
 
+// ═══════════════════════════════════════════════════════════════
+// USER
+// ═══════════════════════════════════════════════════════════════
+
 public class User
 {
     [Key]
@@ -38,6 +42,7 @@ public class User
     [MaxLength(512)]
     public string? AvatarUrl { get; set; }
 
+    // Navigation
     public ICollection<Contact> Contacts { get; set; } = new List<Contact>();
     public ICollection<ChatParticipant> ChatParticipants { get; set; } = new List<ChatParticipant>();
     public ICollection<Message> SentMessages { get; set; } = new List<Message>();
@@ -51,6 +56,10 @@ public enum UserStatus
     Busy = 3,
     Invisible = 4
 }
+
+// ═══════════════════════════════════════════════════════════════
+// CONTACT (Buddy List)
+// ═══════════════════════════════════════════════════════════════
 
 public class Contact
 {
@@ -80,6 +89,10 @@ public enum ContactStatus
     Blocked = 2,
     Denied = 3
 }
+
+// ═══════════════════════════════════════════════════════════════
+// CHAT
+// ═══════════════════════════════════════════════════════════════
 
 public class Chat
 {
@@ -131,6 +144,10 @@ public enum ParticipantRole
     Owner = 2
 }
 
+// ═══════════════════════════════════════════════════════════════
+// MESSAGE
+// ═══════════════════════════════════════════════════════════════
+
 public class Message
 {
     [Key]
@@ -177,6 +194,10 @@ public enum MessageType
     Sticker = 4
 }
 
+// ═══════════════════════════════════════════════════════════════
+// REFRESH TOKEN
+// ═══════════════════════════════════════════════════════════════
+
 public class RefreshToken
 {
     [Key]
@@ -192,6 +213,10 @@ public class RefreshToken
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool IsRevoked { get; set; } = false;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// DEVICE TOKEN (Push)
+// ═══════════════════════════════════════════════════════════════
 
 public class DeviceToken
 {
@@ -211,6 +236,10 @@ public class DeviceToken
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// WEB PUSH SUBSCRIPTION (PWA / iOS home screen)
+// ═══════════════════════════════════════════════════════════════
 
 public class WebPushSubscription
 {
@@ -232,6 +261,10 @@ public class WebPushSubscription
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// E2E KEY BUNDLE (public keys only — server never sees private keys)
+// ═══════════════════════════════════════════════════════════════
 
 public class UserKeyBundle
 {

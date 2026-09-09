@@ -21,14 +21,17 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        // User
         modelBuilder.Entity<User>(e =>
         {
             e.HasIndex(u => u.Nickname).IsUnique();
             e.HasIndex(u => u.Uin).IsUnique();
+            // Portable unique index on Email (nulls allowed on both SQLite and PostgreSQL)
             e.HasIndex(u => u.Email).IsUnique();
             e.Property(u => u.Status).HasConversion<int>();
         });
 
+        // Contact
         modelBuilder.Entity<Contact>(e =>
         {
             e.HasOne(c => c.Owner)
@@ -45,11 +48,13 @@ public class AppDbContext : DbContext
             e.Property(c => c.Status).HasConversion<int>();
         });
 
+        // Chat
         modelBuilder.Entity<Chat>(e =>
         {
             e.Property(c => c.Type).HasConversion<int>();
         });
 
+        // ChatParticipant
         modelBuilder.Entity<ChatParticipant>(e =>
         {
             e.HasOne(p => p.Chat)
@@ -66,6 +71,7 @@ public class AppDbContext : DbContext
             e.Property(p => p.Role).HasConversion<int>();
         });
 
+        // Message
         modelBuilder.Entity<Message>(e =>
         {
             e.HasOne(m => m.Chat)
@@ -84,6 +90,7 @@ public class AppDbContext : DbContext
             e.Property(m => m.Type).HasConversion<int>();
         });
 
+        // RefreshToken
         modelBuilder.Entity<RefreshToken>(e =>
         {
             e.HasOne(t => t.User)
@@ -94,6 +101,7 @@ public class AppDbContext : DbContext
             e.HasIndex(t => t.Token).IsUnique();
         });
 
+        // DeviceToken
         modelBuilder.Entity<DeviceToken>(e =>
         {
             e.HasOne(d => d.User)
@@ -105,6 +113,7 @@ public class AppDbContext : DbContext
             e.HasIndex(d => d.UserId);
         });
 
+        // WebPushSubscription
         modelBuilder.Entity<WebPushSubscription>(e =>
         {
             e.HasOne(s => s.User)
@@ -116,6 +125,7 @@ public class AppDbContext : DbContext
             e.HasIndex(s => s.UserId);
         });
 
+        // UserKeyBundle
         modelBuilder.Entity<UserKeyBundle>(e =>
         {
             e.HasOne(k => k.User)

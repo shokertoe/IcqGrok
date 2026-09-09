@@ -169,6 +169,9 @@ public class ChatHub : Hub
         lock (Lock) return Task.FromResult(OnlineUsers.Keys.ToList());
     }
 
+    // ─── WebRTC signaling (targeted to peer connections) ────────
+
+    /// <summary>Start call: audioOnly true = voice, false = video</summary>
     public async Task CallOffer(Guid targetUserId, string sdp, bool audioOnly, string? callerName)
     {
         var userId = CurrentUserId;
