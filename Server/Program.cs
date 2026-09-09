@@ -230,21 +230,18 @@ if (Directory.Exists(webRoot))
         RequestPath = "/web"
     });
 
-    // Missing PNG icons → SVG (repo ships SVG; avoids 404 for apple-touch / old cache)
-    app.MapGet("/web/icons/icon-192.png", () =>
+    IResult IconSvg() 
     {
         var svg = Path.Combine(webRoot, "icons", "icon.svg");
         return File.Exists(svg)
             ? Results.File(svg, "image/svg+xml")
             : Results.NotFound();
-    });
-    app.MapGet("/web/icons/icon-512.png", () =>
-    {
-        var svg = Path.Combine(webRoot, "icons", "icon.svg");
-        return File.Exists(svg)
-            ? Results.File(svg, "image/svg+xml")
-            : Results.NotFound();
-    });
+    }
+
+    // Browsers request these by convention — map to SVG to avoid noisy 404s
+    app.MapGet("/favicon.ico", IconSvg);
+    app.MapGet("/web/icons/icon-192.png", IconSvg);
+    app.MapGet("/web/icons/icon-512.png", IconSvg);
 }
 
 app.UseStaticFiles(new StaticFileOptions
