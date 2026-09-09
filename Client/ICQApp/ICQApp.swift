@@ -2,24 +2,17 @@ import SwiftUI
 
 @main
 struct ICQApp: App {
-    @StateObject private var appViewModel = AppViewModel()
+    @StateObject private var appVM = AppViewModel()
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if appViewModel.isAuthenticated {
-                    MainView()
-                } else {
-                    LoginView()
-                }
+            if appVM.isLoggedIn {
+                MainView()
+                    .environmentObject(appVM)
+            } else {
+                LoginView()
+                    .environmentObject(appVM)
             }
-            .environmentObject(appViewModel)
-            #if os(macOS)
-            .frame(minWidth: 400, minHeight: 500)
-            #endif
         }
-        #if os(macOS)
-        .defaultSize(width: 1000, height: 650)
-        #endif
     }
 }
