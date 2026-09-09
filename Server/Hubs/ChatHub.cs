@@ -1,8 +1,9 @@
-using System.Security.Claims;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.SignalR;
+using ICQ.Server.Data;
 using ICQ.Server.Models;
 using ICQ.Server.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ICQ.Server.Hubs;
 
@@ -10,177 +11,196 @@ namespace ICQ.Server.Hubs;
 public class ChatHub : Hub
 {
     private readonly ChatService _chatService;
+    private readonly AuthService _authService;
     private readonly PushService _pushService;
+    private readonly WebPushService _webPush;
+    private readonly AppDbContext _db;
     private readonly ILogger<ChatHub> _logger;
 
-    // connectionId -> userId
-    private static readonly Dictionary<string, int> ConnectionUsers = new();
-    // userId -> set of connectionIds
-    private static readonly Dictionary<int, HashSet<string>> UserConnections = new();
+    private static readonly Dictionary<Guid, HashSet<string>> OnlineUsers = new();
+    private static readonly object Lock = new();
 
-    public ChatHub(ChatService chatService, PushService pushService, ILogger<ChatHub> logger)
+    public ChatHub(
+        ChatService chatService,
+        AuthService authService,
+        PushService pushService,
+        WebPushService webPush,
+        AppDbContext db,
+        ILogger<ChatHub> logger)
     {
         _chatService = chatService;
+        _authService = authService;
         _pushService = pushService;
+        _webPush = webPush;
+        _db = db;
         _logger = logger;
+    }
+
+    private Guid? CurrentUserId =>
+        _authService.GetUserIdFromPrincipal(Context.User!);
+
+    private static IReadOnlyList<string> ConnectionsOf(Guid userId)
+    {
+        lock (Lock)
+        {
+            return OnlineUsers.TryGetValue(userId, out var set)
+                ? set.ToList()
+                : Array.Empty<string>();
+        }
+    }
+
+    private async Task SendToUserAsync(Guid userId, string method, params object?[] args)
+    {
+        foreach (var connId in ConnectionsOf(userId))
+            await Clients.Client(connId).SendAsync(method, args);
     }
 
     public override async Task OnConnectedAsync()
     {
-        var userId = GetUserId();
-        if (userId == null) { Context.Abort(); return; }
+        var userId = CurrentUserId;
+        if (userId is null) { Context.Abort(); return; }
 
-        lock (UserConnections)
+        lock (Lock)
         {
-            ConnectionUsers[Context.ConnectionId] = userId.Value;
-            if (!UserConnections.TryGetValue(userId.Value, out var set))
-            {
-                set = new HashSet<string>();
-                UserConnections[userId.Value] = set;
-            }
-            set.Add(Context.ConnectionId);
+            if (!OnlineUsers.ContainsKey(userId.Value))
+                OnlineUsers[userId.Value] = new HashSet<string>();
+            OnlineUsers[userId.Value].Add(Context.ConnectionId);
         }
 
-        await Groups.AddToGroupAsync(Context.ConnectionId, $"user_{userId}");
-        await _chatService.SetOnlineStatusAsync(userId.Value, true);
-        await Clients.Others.SendAsync("UserStatusChanged", userId.Value, "online");
+        await _chatService.UpdateUserStatusAsync(userId.Value, UserStatus.Online);
+        await Clients.Others.SendAsync("UserStatusChanged", userId.Value, (int)UserStatus.Online);
         await base.OnConnectedAsync();
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        int? userId = null;
-        lock (UserConnections)
+        var userId = CurrentUserId;
+        if (userId is not null)
         {
-            if (ConnectionUsers.TryGetValue(Context.ConnectionId, out var uid))
+            bool wentOffline = false;
+            lock (Lock)
             {
-                userId = uid;
-                ConnectionUsers.Remove(Context.ConnectionId);
-                if (UserConnections.TryGetValue(uid, out var set))
+                if (OnlineUsers.TryGetValue(userId.Value, out var connections))
                 {
-                    set.Remove(Context.ConnectionId);
-                    if (set.Count == 0)
+                    connections.Remove(Context.ConnectionId);
+                    if (connections.Count == 0)
                     {
-                        UserConnections.Remove(uid);
+                        OnlineUsers.Remove(userId.Value);
+                        wentOffline = true;
                     }
                 }
             }
-        }
-
-        if (userId != null)
-        {
-            var stillOnline = false;
-            lock (UserConnections)
+            if (wentOffline)
             {
-                stillOnline = UserConnections.ContainsKey(userId.Value);
-            }
-            if (!stillOnline)
-            {
-                await _chatService.SetOnlineStatusAsync(userId.Value, false);
-                await Clients.Others.SendAsync("UserStatusChanged", userId.Value, "offline");
+                await _chatService.UpdateUserStatusAsync(userId.Value, UserStatus.Offline);
+                await Clients.Others.SendAsync("UserStatusChanged", userId.Value, (int)UserStatus.Offline);
             }
         }
         await base.OnDisconnectedAsync(exception);
     }
 
-    public async Task SendMessage(int chatId, string content, bool isEncrypted = false, string? encryptedPayload = null)
+    public async Task JoinChat(Guid chatId) =>
+        await Groups.AddToGroupAsync(Context.ConnectionId, chatId.ToString());
+
+    public async Task LeaveChat(Guid chatId) =>
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, chatId.ToString());
+
+    public async Task SendMessage(SendMessageRequest request)
     {
-        var userId = GetUserId();
-        if (userId == null) return;
+        var userId = CurrentUserId;
+        if (userId is null) return;
 
-        var msg = await _chatService.SendMessageAsync(userId.Value, chatId, content, isEncrypted, encryptedPayload);
-        if (msg == null) return;
-
-        var participants = await _chatService.GetChatParticipantIdsAsync(chatId);
-        foreach (var pid in participants)
+        var (message, error) = await _chatService.SendMessageAsync(userId.Value, request);
+        if (error is not null || message is null)
         {
-            await Clients.Group($"user_{pid}").SendAsync("ReceiveMessage", msg);
-            if (pid != userId.Value)
+            await Clients.Caller.SendAsync("Error", error ?? "Failed to send");
+            return;
+        }
+
+        var display = message.IsEncrypted
+            ? message
+            : message with { Text = SmileyPack.Expand(message.Text) };
+        await Clients.Group(request.ChatId.ToString()).SendAsync("ReceiveMessage", display);
+
+        var participantIds = await _db.ChatParticipants
+            .Where(p => p.ChatId == request.ChatId && p.UserId != userId.Value)
+            .Select(p => p.UserId)
+            .ToListAsync();
+
+        List<Guid> online;
+        lock (Lock) { online = OnlineUsers.Keys.ToList(); }
+
+        var preview = message.IsEncrypted ? "🔒 Encrypted message" : SmileyPack.Expand(message.Text);
+        if (preview?.Length > 80) preview = preview[..80] + "…";
+
+        foreach (var pid in participantIds)
+        {
+            if (!online.Contains(pid))
             {
-                await _pushService.SendMessagePushAsync(pid, msg);
+                await _pushService.NotifyNewMessageAsync(pid, message, message.SenderNickname);
+                await _webPush.NotifyAsync(pid, message.SenderNickname, preview ?? "New message",
+                    new Dictionary<string, string>
+                    {
+                        ["chatId"] = message.ChatId.ToString(),
+                        ["messageId"] = message.Id.ToString()
+                    });
             }
         }
     }
 
-    public async Task Typing(int chatId, bool isTyping)
+    public async Task Typing(Guid chatId, bool isTyping)
     {
-        var userId = GetUserId();
-        if (userId == null) return;
-        var participants = await _chatService.GetChatParticipantIdsAsync(chatId);
-        foreach (var pid in participants.Where(p => p != userId.Value))
-        {
-            await Clients.Group($"user_{pid}").SendAsync("UserTyping", chatId, userId.Value, isTyping);
-        }
+        var userId = CurrentUserId;
+        if (userId is null) return;
+        await Clients.OthersInGroup(chatId.ToString())
+            .SendAsync("UserTyping", chatId, userId.Value, isTyping);
     }
 
-    public async Task SetStatus(string status)
+    public async Task SetStatus(int status, string? statusMessage = null)
     {
-        var userId = GetUserId();
-        if (userId == null) return;
-        await _chatService.SetUserStatusAsync(userId.Value, status);
-        await Clients.Others.SendAsync("UserStatusChanged", userId.Value, status);
+        var userId = CurrentUserId;
+        if (userId is null) return;
+        await _chatService.UpdateUserStatusAsync(userId.Value, (UserStatus)status, statusMessage);
+        await Clients.Others.SendAsync("UserStatusChanged", userId.Value, status, statusMessage);
     }
 
-    // WebRTC signaling - targeted to specific user connections
-    public async Task CallOffer(int targetUserId, string sdp, string callType)
+    public Task<List<Guid>> GetOnlineUsers()
     {
-        var userId = GetUserId();
-        if (userId == null) return;
-        await Clients.Group($"user_{targetUserId}").SendAsync("CallOffer", userId.Value, sdp, callType, Context.ConnectionId);
+        lock (Lock) return Task.FromResult(OnlineUsers.Keys.ToList());
     }
 
-    public async Task CallAnswer(int targetUserId, string sdp, string targetConnectionId)
+    public async Task CallOffer(Guid targetUserId, string sdp, bool audioOnly, string? callerName)
     {
-        var userId = GetUserId();
-        if (userId == null) return;
-        if (!string.IsNullOrEmpty(targetConnectionId))
-            await Clients.Client(targetConnectionId).SendAsync("CallAnswer", userId.Value, sdp, Context.ConnectionId);
-        else
-            await Clients.Group($"user_{targetUserId}").SendAsync("CallAnswer", userId.Value, sdp, Context.ConnectionId);
+        var userId = CurrentUserId;
+        if (userId is null) return;
+        await SendToUserAsync(targetUserId, "CallOffer", userId.Value, sdp, audioOnly, callerName ?? "Caller");
     }
 
-    public async Task IceCandidate(int targetUserId, string candidate, string? targetConnectionId)
+    public async Task CallAnswer(Guid callerId, string sdp)
     {
-        var userId = GetUserId();
-        if (userId == null) return;
-        if (!string.IsNullOrEmpty(targetConnectionId))
-            await Clients.Client(targetConnectionId).SendAsync("IceCandidate", userId.Value, candidate, Context.ConnectionId);
-        else
-            await Clients.Group($"user_{targetUserId}").SendAsync("IceCandidate", userId.Value, candidate, Context.ConnectionId);
+        var userId = CurrentUserId;
+        if (userId is null) return;
+        await SendToUserAsync(callerId, "CallAnswer", userId.Value, sdp);
     }
 
-    public async Task Hangup(int targetUserId, string? targetConnectionId)
+    public async Task IceCandidate(Guid peerId, string candidate)
     {
-        var userId = GetUserId();
-        if (userId == null) return;
-        if (!string.IsNullOrEmpty(targetConnectionId))
-            await Clients.Client(targetConnectionId).SendAsync("Hangup", userId.Value);
-        else
-            await Clients.Group($"user_{targetUserId}").SendAsync("Hangup", userId.Value);
+        var userId = CurrentUserId;
+        if (userId is null) return;
+        await SendToUserAsync(peerId, "IceCandidate", userId.Value, candidate);
     }
 
-    public async Task RejectCall(int targetUserId, string? targetConnectionId)
+    public async Task CallHangup(Guid peerId)
     {
-        var userId = GetUserId();
-        if (userId == null) return;
-        if (!string.IsNullOrEmpty(targetConnectionId))
-            await Clients.Client(targetConnectionId).SendAsync("CallRejected", userId.Value);
-        else
-            await Clients.Group($"user_{targetUserId}").SendAsync("CallRejected", userId.Value);
+        var userId = CurrentUserId;
+        if (userId is null) return;
+        await SendToUserAsync(peerId, "CallHangup", userId.Value);
     }
 
-    private int? GetUserId()
+    public async Task CallReject(Guid callerId)
     {
-        var claim = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                    ?? Context.User?.FindFirst("sub")?.Value;
-        return int.TryParse(claim, out var id) ? id : null;
-    }
-
-    public static IReadOnlyCollection<string> GetConnectionsForUser(int userId)
-    {
-        lock (UserConnections)
-        {
-            return UserConnections.TryGetValue(userId, out var set) ? set.ToList() : Array.Empty<string>();
-        }
+        var userId = CurrentUserId;
+        if (userId is null) return;
+        await SendToUserAsync(callerId, "CallReject", userId.Value);
     }
 }
