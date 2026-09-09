@@ -129,7 +129,8 @@ public class ChatHub : Hub
             ? message
             : message with { Text = SmileyPack.Expand(message.Text) };
 
-        await Clients.Group(request.ChatId.ToString()).SendAsync("ReceiveMessage", display);
+        // Others in group + caller (so sender always gets ack even if not JoinChat'd)
+        await Clients.OthersInGroup(request.ChatId.ToString()).SendAsync("ReceiveMessage", display);
         await Clients.Caller.SendAsync("ReceiveMessage", display);
 
         var participantIds = await _db.ChatParticipants
