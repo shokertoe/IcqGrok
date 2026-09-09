@@ -1,73 +1,102 @@
 namespace ICQ.Server.Models;
 
-public static class Smileys
+/// <summary>
+/// Classic ICQ-style emoticon codes → emoji (and special markers).
+/// Clients should replace these codes in message text before display.
+/// </summary>
+public static class SmileyPack
 {
-    // Classic ICQ-style smileys + modern emoji + *BANG*
-    public static readonly Dictionary<string, string> Map = new(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyDictionary<string, string> Map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        { ":)", "😊" },
-        { ":-)", "😊" },
-        { ":D", "😃" },
-        { ":-D", "😃" },
-        { ":(", "😞" },
-        { ":-(", "😞" },
-        { ";)", "😉" },
-        { ";-)", "😉" },
-        { ":P", "😛" },
-        { ":-P", "😛" },
-        { ":p", "😛" },
-        { "8)", "😎" },
-        { "8-)", "😎" },
-        { ":'", "😢" },
-        { ":'(", "😢" },
-        { ":*", "😘" },
-        { ":-*", "😘" },
-        { ":O", "😮" },
-        { ":-O", "😮" },
-        { ":/", "😕" },
-        { ":-/", "😕" },
-        { "<3", "❤️" },
-        { "*BANG*", "🤦‍♂️" },
-        { "*bang*", "🤦‍♂️" },
-        { "BANG", "🤦‍♂️" },
-        { ":beer:", "🍺" },
-        { ":coffee:", "☕" },
-        { ":thumbsup:", "👍" },
-        { ":thumbsdown:", "👎" },
-        { ":fire:", "🔥" },
-        { ":100:", "💯" },
-        { ":ok:", "👌" },
-        { ":wave:", "👋" },
-        { ":clap:", "👏" },
-        { ":heart:", "❤️" },
-        { ":broken_heart:", "💔" },
-        { ":smile:", "😄" },
-        { ":laugh:", "😂" },
-        { ":wink:", "😉" },
-        { ":cool:", "😎" },
-        { ":angry:", "😠" },
-        { ":cry:", "😢" },
-        { ":sad:", "😔" },
-        { ":surprised:", "😲" },
-        { ":thinking:", "🤔" },
-        { ":shrug:", "🤷" },
-        { ":facepalm:", "🤦‍♂️" },
+        [":)"] = "🙂",
+        [":-)"] = "🙂",
+        [":("] = "🙁",
+        [":-("] = "🙁",
+        [":D"] = "😀",
+        [":-D"] = "😀",
+        [";)"] = "😉",
+        [";-)"] = "😉",
+        [":P"] = "😛",
+        [":-P"] = "😛",
+        [":p"] = "😛",
+        [":*"] = "😘",
+        [":-*"] = "😘",
+        ["8)"] = "😎",
+        ["8-)"] = "😎",
+        ["B)"] = "😎",
+        [":O"] = "😮",
+        [":-O"] = "😮",
+        [":o"] = "😮",
+        [":|"] = "😐",
+        [":-|"] = "😐",
+        [":$"] = "😳",
+        [":-$"] = "😳",
+        [":@"] = "😠",
+        [":-@"] = "😠",
+        [":'("] = "😢",
+        ["XD"] = "😆",
+        ["xD"] = "😆",
+        [":/"] = "😕",
+        [":-/"] = "😕",
+        [":\\"] = "😕",
+        ["<3"] = "❤️",
+        ["</3"] = "💔",
+        [":3"] = "😺",
+        ["O:)"] = "😇",
+        ["O:-)"] = "😇",
+        [">:("] = "😡",
+        [">:-("] = "😡",
+        [":X"] = "🤐",
+        [":-X"] = "🤐",
+        ["*JOKINGLY*"] = "😜",
+        ["*KISSING*"] = "💋",
+        ["*STOP*"] = "🛑",
+        ["*THUMBS UP*"] = "👍",
+        ["*THUMBS DOWN*"] = "👎",
+        ["*APPLAUD*"] = "👏",
+        ["*OK*"] = "👌",
+        ["*HELP*"] = "🆘",
+        ["*PARTY*"] = "🥳",
+        ["*DRINK*"] = "🍺",
+        ["*COFFEE*"] = "☕",
+        ["*ROSE*"] = "🌹",
+        ["*SUN*"] = "☀️",
+        ["*RAIN*"] = "🌧️",
+        ["*MUSIC*"] = "🎵",
+        ["*DANCE*"] = "💃",
+        ["*ANGEL*"] = "😇",
+        ["*DEVIL*"] = "😈",
+        ["*LOVE*"] = "🥰",
+        ["*CRAZY*"] = "🤪",
+        ["*SICK*"] = "🤒",
+        ["*YAWN*"] = "🥱",
+        ["*SLEEP*"] = "😴",
+        ["*THINK*"] = "🤔",
+        ["*IDEA*"] = "💡",
+        ["*BOMB*"] = "💣",
+        ["*FIRE*"] = "🔥",
+        ["*BANG*"] = "🤦‍♂️",
+        ["*HEADBANG*"] = "🤦‍♂️",
+        [":bang:"] = "🤦‍♂️",
+        ["*WALL*"] = "🤦‍♂️",
+        ["*FACEPALM*"] = "🤦",
+        ["*PANIC*"] = "😱",
+        ["*SIGH*"] = "😮‍💨",
+        ["*SHRUG*"] = "🤷",
     };
 
-    public static string Expand(string text)
+    /// <summary>Replace emoticon codes in text with emoji (server-side helper / API).</summary>
+    public static string Expand(string? text)
     {
-        if (string.IsNullOrEmpty(text)) return text;
+        if (string.IsNullOrEmpty(text)) return text ?? "";
         var result = text;
-        // Longer codes first to avoid partial replaces
         foreach (var kv in Map.OrderByDescending(k => k.Key.Length))
-        {
             result = result.Replace(kv.Key, kv.Value, StringComparison.OrdinalIgnoreCase);
-        }
         return result;
     }
 
-    public static object GetPack()
-    {
-        return Map.Select(kv => new { code = kv.Key, emoji = kv.Value }).ToList();
-    }
+    public static IReadOnlyList<SmileyDto> List() =>
+        Map.Select(kv => new SmileyDto(kv.Key, kv.Value)).DistinctBy(s => s.Emoji).ToList();
 }
+
+public record SmileyDto(string Code, string Emoji);
