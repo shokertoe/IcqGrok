@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -32,7 +33,6 @@ public class AuthService
             await _db.Users.AnyAsync(u => u.Email != null && u.Email.ToLower() == request.Email.ToLower()))
             return (null, "Email already registered");
 
-        // Generate sequential UIN (starting from 100000 like classic ICQ)
         var maxUin = await _db.Users.MaxAsync(u => (long?)u.Uin) ?? 99999;
         var uin = maxUin + 1;
 
@@ -82,7 +82,6 @@ public class AuthService
         if (token is null || token.ExpiresAt < DateTime.UtcNow)
             return (null, "Invalid or expired refresh token");
 
-        // Rotate refresh token
         token.IsRevoked = true;
         await _db.SaveChangesAsync();
 
@@ -103,14 +102,14 @@ public class AuthService
     {
         var accessToken = GenerateJwt(user);
         var expiresAt = DateTime.UtcNow.AddMinutes(
-            double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60"));
+            double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60", CultureInfo.InvariantCulture));
 
         var refreshToken = new RefreshToken
         {
             UserId = user.Id,
             Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
             ExpiresAt = DateTime.UtcNow.AddDays(
-                double.Parse(_config["Jwt:RefreshTokenDays"] ?? "30"))
+                double.Parse(_config["Jwt:RefreshTokenDays"] ?? "30", CultureInfo.InvariantCulture))
         };
 
         _db.RefreshTokens.Add(refreshToken);
@@ -145,7 +144,7 @@ public class AuthService
             audience: _config["Jwt:Audience"] ?? "ICQ.Client",
             claims: claims,
             expires: DateTime.UtcNow.AddMinutes(
-                double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60")),
+                double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60", CultureInfo.InvariantCulture)),
             signingCredentials: credentials
         );
 
