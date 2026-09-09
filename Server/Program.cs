@@ -194,7 +194,6 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 
-// PhysicalFileProvider requires an absolute path — appsettings may use relative "wwwroot/uploads"
 static string ResolveContentRoot(string? configured, string relativeDefault)
 {
     var path = string.IsNullOrWhiteSpace(configured) ? relativeDefault : configured;
@@ -230,6 +229,22 @@ if (Directory.Exists(webRoot))
         FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot),
         RequestPath = "/web"
     });
+
+    // Missing PNG icons → SVG (repo ships SVG; avoids 404 for apple-touch / old cache)
+    app.MapGet("/web/icons/icon-192.png", () =>
+    {
+        var svg = Path.Combine(webRoot, "icons", "icon.svg");
+        return File.Exists(svg)
+            ? Results.File(svg, "image/svg+xml")
+            : Results.NotFound();
+    });
+    app.MapGet("/web/icons/icon-512.png", () =>
+    {
+        var svg = Path.Combine(webRoot, "icons", "icon.svg");
+        return File.Exists(svg)
+            ? Results.File(svg, "image/svg+xml")
+            : Results.NotFound();
+    });
 }
 
 app.UseStaticFiles(new StaticFileOptions
@@ -247,7 +262,7 @@ app.MapHub<ChatHub>("/hubs/chat");
 app.MapGet("/", () => Results.Ok(new
 {
     name = "ICQ Messenger Server",
-    version = "1.1.2",
+    version = "1.1.3",
     database = usePostgres ? "PostgreSQL" : "SQLite",
     status = "running",
     hubs = new[] { "/hubs/chat" },
