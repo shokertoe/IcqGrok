@@ -62,10 +62,12 @@ public class AuthController : ApiControllerBase
         if (!TryGetUserId(out var userId, out var unauthorized))
             return unauthorized!;
 
+        var uin = User.FindFirst("uin")?.Value;
         return Ok(new
         {
             id = userId,
-            nickname = User.Identity?.Name
+            nickname = User.Identity?.Name,
+            uin = uin != null ? int.Parse(uin) : 0
         });
     }
 }

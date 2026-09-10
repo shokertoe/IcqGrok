@@ -263,6 +263,8 @@ public class ChatService : IChatService
 
         long? uinQuery = long.TryParse(query, out var u) ? u : null;
 
+        _logger.LogInformation("Searching users by query='{Query}', uin={Uin}", query, uinQuery);
+
         var users = await _db.Users
             .Where(u => u.Id != currentUserId &&
                         (u.Nickname.ToLower().Contains(query) ||
@@ -272,6 +274,8 @@ public class ChatService : IChatService
             .OrderBy(u => u.Nickname)
             .Take(limit)
             .ToListAsync();
+
+        _logger.LogInformation("Found {Count} users for query='{Query}'", users.Count, query);
 
         return users.Select(AuthService.MapToDto).ToList();
     }

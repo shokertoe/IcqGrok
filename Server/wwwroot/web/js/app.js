@@ -107,9 +107,11 @@ function bindLogin() {
       render();
       toast(`Welcome, ${res.user.nickname}! UIN ${res.user.uin} 🎉`);
     } catch (e) {
-      $("#login-err").textContent = e.message;
+      const errEl = $("#login-err");
+      if (errEl) errEl.textContent = e.message;
     } finally {
-      $("#login-btn").disabled = false;
+      const btn = $("#login-btn");
+      if (btn) btn.disabled = false;
     }
   };
   $("#login-pass").onkeydown = (e) => { if (e.key === "Enter") $("#login-btn").click(); };
@@ -307,7 +309,7 @@ async function decryptMessagesForChat(chatId) {
     if (m.isEncrypted && !m._decrypted && m.text) {
       try {
         const keyPeer = m.senderId === state.user.id ? peerId : m.senderId;
-        m.text = await E2E.decryptText(m.text, keyPeer, API);
+        m.text = await E2E.decryptText(keyPeer, m.text);
         m._decrypted = true;
         changed = true;
       } catch (e) {
@@ -360,14 +362,20 @@ function bindMain() {
         try {
           const r = await API.searchUsers(state.searchQ);
           state.searchResults = r.users || r || [];
-          render();
-          const s = $("#search"); if (s) { s.focus(); s.value = state.searchQ; }
+          // Update only the list, not the whole DOM — preserves cursor position
+          const listEl = $("#list");
+          if (listEl && state.tab === "contacts") {
+            listEl.innerHTML = renderContactList();
+            bindSearchResults();
+          }
         } catch {}
       }, 300);
     } else {
       state.searchResults = [];
-      render();
-      const s = $("#search"); if (s) { s.focus(); s.value = state.searchQ; }
+      const listEl = $("#list");
+      if (listEl && state.tab === "contacts") {
+        listEl.innerHTML = renderContactList();
+      }
     }
   };
 
@@ -377,7 +385,7 @@ function bindMain() {
   $$("[data-user]").forEach((el) => {
     el.onclick = async () => {
       try {
-        const chat = await API.createPrivate(el.dataset.user);
+        const chat = await API.createChat(el.dataset.user);
         if (!state.chats.find((c) => c.id === chat.id)) state.chats.unshift(chat);
         await openChat(chat.id);
       } catch (e) { toast(e.message); }
@@ -388,7 +396,7 @@ function bindMain() {
     const uin = prompt("Enter UIN number:");
     if (!uin) return;
     try {
-      await API.addContact(Number(uin));
+      await API.addContact({ TargetUin: Number(uin) });
       state.contacts = await API.getContacts();
       toast("Contact request sent 🙂");
       render();
@@ -396,6 +404,18 @@ function bindMain() {
   });
 
   if (state.activeChatId) bindChat();
+}
+
+function bindSearchResults() {
+  $$("[data-user]").forEach((el) => {
+    el.onclick = async () => {
+      try {
+        const chat = await API.createChat(el.dataset.user);
+        if (!state.chats.find((c) => c.id === chat.id)) state.chats.unshift(chat);
+        await openChat(chat.id);
+      } catch (e) { toast(e.message); }
+    };
+  });
 }
 
 function bindChat() {
@@ -505,10 +525,10 @@ function insertAtCursor(ta, text) {
 async function sendPayload(body) {
   try {
     const chat = state.chats.find((c) => c.id === body.chatId);
-    const peerId = ICQE2E.peerIdFromChat(chat, state.user.id);
+    const peerId = E2E.peerIdFromChat(chat, state.user.id);
     if (peerId && body.text && body.type === 0) {
       try {
-        body.text = await ICQE2E.encryptText(body.text, peerId, API);
+        body.text = await ICQE2E.encryptText(peerId, body.text);
         body.isEncrypted = true;
       } catch {
         /* send plaintext if no keys */
@@ -558,7 +578,8 @@ function scrollMessages() {
 }
 
 async function bootSession() {
-  await ICQE2E.ensureKeys(API);
+  // E2E key upload is non-blocking — if it fails, messages just won't be encrypted
+  ICQE2E.ensureKeys(API).catch(() => {});
   state.chats = await API.getChats();
   try { state.contacts = await API.getContacts(); } catch { state.contacts = []; }
   state.hub = createHub({
@@ -574,7 +595,7 @@ async function bootSession() {
     onStatus: () => {},
     onError: (err) => toast(String(err))
   });
-  await state.hub.connect();
+  await state.hub.start();
   if (window.ICQCall) ICQCall.attachHub(state.hub);
 }
 
@@ -605,6 +626,28 @@ function urlBase64ToUint8Array(base64String) {
   const arr = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
   return arr;
+}
+
+function createHub(handlers) {
+  const hub = new IcqHub('/hubs/chat', API.token);
+
+  hub.on('ReceiveMessage', (m) => {
+    if (handlers.onMessage) handlers.onMessage(m);
+  });
+
+  hub.on('UserTyping', (chatId, userId, isTyping) => {
+    if (handlers.onTyping) handlers.onTyping(chatId, userId, isTyping);
+  });
+
+  hub.on('UserStatusChanged', (userId, status) => {
+    if (handlers.onStatus) handlers.onStatus(userId, status);
+  });
+
+  hub.on('Error', (err) => {
+    if (handlers.onError) handlers.onError(err);
+  });
+
+  return hub;
 }
 
 (async function main() {

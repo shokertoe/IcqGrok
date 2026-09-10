@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ICQ.Server.Controllers;
 
 [ApiController]
-[Authorize]
+//[NotAuthorize]
 [Route("api/[controller]")]
 public class KeysController : ApiControllerBase
 {

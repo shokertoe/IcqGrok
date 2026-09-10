@@ -5,11 +5,11 @@ const API = {
   refresh: localStorage.getItem('icq_refresh') || null,
 
   setTokens(res) {
-    let accessToken = res.AccessToken;
-    let refreshToken = res.RefreshToken;
+    let accessToken = res.accessToken || res.AccessToken;
+    let refreshToken = res.refreshToken || res.RefreshToken;
     this.token = accessToken;
     this.refresh = refreshToken;
-    if (accessToken) localStorage.setItem('icq_token', refreshToken);
+    if (accessToken) localStorage.setItem('icq_token', accessToken);
     else localStorage.removeItem('icq_token');
     if (refreshToken) localStorage.setItem('icq_refresh', refreshToken);
     else localStorage.removeItem('icq_refresh');
@@ -54,7 +54,7 @@ const API = {
         body: JSON.stringify({ refreshToken: this.refresh })
       }).then(r => r.json());
       if (data.accessToken) {
-        this.setTokens(data.accessToken, data.refreshToken || this.refresh);
+        this.setTokens(data);
         return true;
       }
     } catch {}
@@ -68,28 +68,40 @@ const API = {
   login(emailOrUin, password) {
     return this.request('POST', '/api/auth/login', { "NicknameOrEmail": emailOrUin, password });
   },
-  me() { return this.request('GET', '/api/users/me'); },
-  searchUsers(q) { return this.request('GET', '/api/users/search?q=' + encodeURIComponent(q)); },
+  me() { return this.request('GET', '/api/auth/me'); },
+  searchUsers(q) {
+    const url = '/api/users/search?q=' + encodeURIComponent(q) + '&limit=20';
+    console.log('[API] searchUsers:', url);
+    return this.request('GET', url);
+  },
   getContacts() { return this.request('GET', '/api/users/contacts'); },
   addContact(data) { return this.request('POST', '/api/users/contacts', data); },
   getChats() { return this.request('GET', '/api/chats'); },
-  createChat(otherUserId) { return this.request('POST', '/api/chats', { otherUserId }); },
+  createChat(otherUserId) { return this.request('POST', '/api/chats/private', { TargetUserId: otherUserId }); },
   getMessages(chatId, beforeId) {
     let url = `/api/chats/${chatId}/messages`;
     if (beforeId) url += `?beforeId=${beforeId}`;
     return this.request('GET', url);
   },
-  sendMessage(chatId, content, isEncrypted = false, encryptedPayload = null) {
-    return this.request('POST', '/api/chats/messages', { chatId, content, isEncrypted, encryptedPayload });
+  sendMessage(body) {
+    return this.request('POST', '/api/chats/messages', body);
   },
   uploadFile(file) {
     const fd = new FormData();
     fd.append('file', file);
     return this.request('POST', '/api/files/upload', fd, true);
   },
-  getKeyBundle(userId) { return this.request('GET', `/api/keys/${userId}`); },
-  uploadKeyBundle(bundle) { return this.request('POST', '/api/keys', bundle); },
-  getVapidKey() { return this.request('GET', '/api/push/vapid-public-key'); },
-  subscribePush(sub) { return this.request('POST', '/api/push/subscribe', sub); },
-  getSmileys() { return this.request('GET', '/api/smileys'); }
+  getKeyBundle(userId) { return this.request('GET', `/api/keys/bundle/${userId}`); },
+  uploadKeyBundle(bundle) { return this.request('PUT', '/api/keys/bundle', bundle); },
+  vapidPublicKey() { return this.request('GET', '/api/push/vapid-public-key'); },
+  webPushSubscribe(sub) { return this.request('POST', '/api/push/web/subscribe', sub); },
+  webPushUnsubscribe() { return this.request('POST', '/api/push/web/unsubscribe'); },
+  getSmileys() { return this.request('GET', '/api/smileys'); },
+
+  clearAuth() {
+    this.token = null;
+    this.refresh = null;
+    localStorage.removeItem('icq_token');
+    localStorage.removeItem('icq_refresh');
+  }
 };

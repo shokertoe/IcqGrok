@@ -9,6 +9,44 @@ const ICQCall = {
   isCaller: false,
   onState: null,
 
+  _showOverlay() {
+    const el = document.getElementById('call-overlay');
+    if (el) el.classList.remove('hidden');
+  },
+
+  _hideOverlay() {
+    const el = document.getElementById('call-overlay');
+    if (el) el.classList.add('hidden');
+  },
+
+  _updateUI(type, status, peerName) {
+    const typeEl = document.getElementById('call-type');
+    const nameEl = document.getElementById('call-peer-name');
+    const statusEl = document.getElementById('call-status');
+    const avatarEl = document.getElementById('call-avatar');
+    const controlsEl = document.getElementById('call-controls');
+    const videosEl = document.getElementById('call-videos');
+
+    if (typeEl) typeEl.textContent = type || 'Voice call';
+    if (nameEl) nameEl.textContent = peerName || 'Buddy';
+    if (statusEl) statusEl.textContent = status || '';
+    if (avatarEl) avatarEl.textContent = (peerName || '?').charAt(0).toUpperCase();
+
+    if (videosEl) {
+      const remote = videosEl.querySelector('#remoteVideo');
+      const local = videosEl.querySelector('#localVideo');
+      videosEl.style.display = this.isVideo ? 'flex' : 'none';
+      if (this.remoteStream && remote) remote.srcObject = this.remoteStream;
+      if (this.localStream && local) local.srcObject = this.localStream;
+    }
+
+    if (controlsEl) {
+      controlsEl.innerHTML = `
+        <button class="hangup" onclick="ICQCall.hangup()" title="Hang up">📞</button>
+      `;
+    }
+  },
+
   async startCall(userId, video = false) {
     this.targetUserId = userId;
     this.isVideo = video;
@@ -82,6 +120,7 @@ const ICQCall = {
     this.targetUserId = null;
     this.targetConnectionId = null;
     this._pendingOffer = null;
+    this._hideOverlay();
     this._emit('ended');
   },
 
@@ -121,5 +160,43 @@ const ICQCall = {
 
   _emit(event, data) {
     if (typeof this.onState === 'function') this.onState(event, data);
+
+    switch (event) {
+      case 'calling':
+        this._showOverlay();
+        this._updateUI('Voice call', 'Calling...', this.targetUserId);
+        break;
+      case 'incoming':
+        this._showOverlay();
+        this._updateUI(data?.callType === 'video' ? 'Video call' : 'Voice call', `Incoming from ${data?.fromUserId || '?'}`);
+        break;
+      case 'connected':
+        this._updateUI(this.isVideo ? 'Video call' : 'Voice call', 'Connected');
+        break;
+      case 'ended':
+      case 'remoteStream':
+      case 'localStream':
+        this._updateUI();
+        break;
+    }
+  },
+
+  attachHub(hub) {
+    window.hub = hub;
+    hub.on('CallOffer', async (fromUserId, sdp, callType, fromConnectionId) => {
+      await this.handleOffer(fromUserId, sdp, callType, fromConnectionId);
+    });
+    hub.on('CallAnswer', async (fromUserId, sdp, fromConnectionId) => {
+      await this.handleAnswer(fromUserId, sdp, fromConnectionId);
+    });
+    hub.on('IceCandidate', async (fromUserId, candidate, fromConnectionId) => {
+      await this.handleIce(fromUserId, candidate, fromConnectionId);
+    });
+    hub.on('CallHangup', async (fromUserId, fromConnectionId) => {
+      this.hangup(false);
+    });
+    hub.on('CallReject', async (fromUserId, fromConnectionId) => {
+      this.hangup(false);
+    });
   }
 };

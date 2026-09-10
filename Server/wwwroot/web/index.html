@@ -31,5 +31,12 @@
   <script src="/web/js/e2e.js"></script>
   <script src="/web/js/webrtc.js"></script>
   <script src="/web/js/app.js"></script>
+  <script>
+    // Ensure call overlay is hidden on initial load
+    document.addEventListener('DOMContentLoaded', () => {
+      const overlay = document.getElementById('call-overlay');
+      if (overlay) overlay.classList.add('hidden');
+    });
+  </script>
 </body>
 </html>

@@ -73,13 +73,8 @@ const E2E = {
 
   async uploadBundle() {
     const pub = await this.getPublicKeyBase64();
-    // Simplified: use identity key as signed prekey for demo
     return API.uploadKeyBundle({
-      identityKeyPublic: pub,
-      signedPreKeyPublic: pub,
-      signedPreKeySignature: 'demo',
-      signedPreKeyId: 1,
-      oneTimePreKeysJson: null
+      identityPublicKey: pub
     });
   },
 
@@ -89,5 +84,18 @@ const E2E = {
     if (bundle && bundle.identityKeyPublic) {
       await this.deriveShared(userId, bundle.identityKeyPublic);
     }
+  },
+
+  peerIdFromChat(chat, currentUserId) {
+    if (!chat || !currentUserId) return null;
+    const other = (chat.participants || []).find((p) => p.id !== currentUserId);
+    return other ? other.id : null;
+  },
+
+  async ensureKeys(api) {
+    await this.init();
+    await this.uploadBundle();
   }
 };
+
+const ICQE2E = E2E;
